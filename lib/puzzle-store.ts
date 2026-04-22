@@ -6,13 +6,6 @@ import { Puzzle } from "@/lib/puzzle";
 const DEFAULT_TIMEZONE = "America/Chicago";
 const DEFAULT_PUZZLE_PATH = path.join(process.cwd(), "data", "puzzles", "default.json");
 const PUZZLE_DIR = path.join(process.cwd(), "data", "puzzles");
-
-type CachedPuzzle = {
-  dateKey: string;
-  puzzle: Puzzle;
-};
-
-let cachedPuzzle: CachedPuzzle | null = null;
 const generationByDate = new Map<string, Promise<boolean>>();
 
 function getDateKey(timeZone: string) {
@@ -164,29 +157,19 @@ export async function getCurrentPuzzle() {
   const timeZone = process.env.PIXORDLE_TIMEZONE ?? DEFAULT_TIMEZONE;
   const dateKey = getDateKey(timeZone);
 
-  if (cachedPuzzle?.dateKey === dateKey) {
-    return cachedPuzzle.puzzle;
-  }
-
   const dailyPath = path.join(PUZZLE_DIR, `${dateKey}.json`);
 
   try {
-    const dailyPuzzle = await readPuzzleFile(dailyPath);
-    cachedPuzzle = { dateKey, puzzle: dailyPuzzle };
-    return dailyPuzzle;
+    return await readPuzzleFile(dailyPath);
   } catch {
     await generateDailyPuzzleIfEnabled(dateKey);
 
     try {
-      const generatedPuzzle = await readPuzzleFile(dailyPath);
-      cachedPuzzle = { dateKey, puzzle: generatedPuzzle };
-      return generatedPuzzle;
+      return await readPuzzleFile(dailyPath);
     } catch {
       // Fall through to default puzzle.
     }
 
-    const fallbackPuzzle = await readPuzzleFile(DEFAULT_PUZZLE_PATH);
-    cachedPuzzle = { dateKey, puzzle: fallbackPuzzle };
-    return fallbackPuzzle;
+    return await readPuzzleFile(DEFAULT_PUZZLE_PATH);
   }
 }

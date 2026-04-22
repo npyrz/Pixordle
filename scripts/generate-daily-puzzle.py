@@ -24,8 +24,9 @@ MAX_GUESSES = 8
 DEFAULT_TIMEZONE = "America/Chicago"
 DEFAULT_CONFIDENCE = 0.20
 MAX_WORDS = 12
+MAX_IMAGE_ATTEMPTS = 10
+MIN_REVEAL_WORDS = 5
 
-# Avoid weak answers that are too generic for a daily puzzle target.
 GENERIC_ANSWER_LABELS = {
     "person",
     "chair",
@@ -33,6 +34,13 @@ GENERIC_ANSWER_LABELS = {
     "tv",
     "cell phone",
     "cup",
+    "object",
+}
+
+BLAND_ANSWER_LABELS = {
+    "building",
+    "sky",
+    "moon",
 }
 
 DEFAULT_TOPICS = [
@@ -55,6 +63,8 @@ ANSWER_ALIASES = {
     "bus": ["coach"],
     "truck": ["lorry"],
     "person": ["human", "rider", "cyclist"],
+    "building": ["tower", "apartment"],
+    "moon": ["lunar"],
 }
 
 WORD_ALIASES = {
@@ -75,6 +85,31 @@ WORD_ALIASES = {
     "handlebar": ["handlebars", "bar", "grip"],
     "seat": ["saddle"],
     "pedal": ["pedals", "crank"],
+    "building": ["tower", "apartment", "highrise"],
+    "moon": ["lunar"],
+    "sky": ["blue sky"],
+    "window": ["windows"],
+    "balcony": ["balconies"],
+}
+
+LABEL_ALT_SYNONYMS = {
+    "building": {"building", "tower", "apartment", "highrise", "block"},
+    "frisbee": {"frisbee", "disc"},
+    "sports ball": {"ball", "football", "basketball", "soccer", "tennis"},
+    "bicycle": {"bike", "bicycle", "cycle"},
+    "person": {"person", "man", "woman", "boy", "girl", "people", "rider", "cyclist"},
+    "car": {"car", "vehicle", "sedan", "auto"},
+    "moon": {"moon", "lunar"},
+    "sky": {"sky"},
+    "window": {"window", "windows"},
+}
+
+ALT_REGION_HINTS = {
+    "moon": [330, 30, 54, 54],
+    "sky": [0, 0, 420, 180],
+    "building": [70, 150, 290, 260],
+    "window": [140, 220, 160, 150],
+    "balcony": [120, 250, 190, 120],
 }
 
 
@@ -116,6 +151,25 @@ def normalize_word(value: str) -> str:
 
 def slugify(value: str) -> str:
     return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", value.lower()))[:48]
+
+
+def tokenize_text(value: str) -> set[str]:
+    if not value:
+        return set()
+    words = re.findall(r"[a-z0-9]+", value.lower())
+    return {word for word in words if len(word) > 1}
+
+
+def label_matches_alt(label: str, alt_tokens: set[str]) -> bool:
+    if not alt_tokens:
+        return False
+
+    label_tokens = set(label.split())
+    if label_tokens & alt_tokens:
+        return True
+
+    synonyms = LABEL_ALT_SYNONYMS.get(label, set())
+    return bool(synonyms & alt_tokens)
 
 
 def clamp(value: float, low: float, high: float) -> float:
@@ -235,12 +289,29 @@ def run_yolo(image_path: Path, model_name: str, confidence: float) -> tuple[list
     return list(unique.values()), width, height
 
 
-def choose_answer(detections: list[dict]) -> str:
+def choose_answer(detections: list[dict], alt_tokens: set[str]) -> str:
+    for item in detections:
+        label = item["label"]
+        if label in GENERIC_ANSWER_LABELS:
+            continue
+        if label_matches_alt(label, alt_tokens):
+            return label
+
     for item in detections:
         label = item["label"]
         if label not in GENERIC_ANSWER_LABELS:
             return label
-    return detections[0]["label"] if detections else "object"
+
+    # Last resort prefers a concrete noun from caption tokens over generic "object".
+    if "building" in alt_tokens:
+        return "building"
+    if "moon" in alt_tokens:
+        return "moon"
+    if "car" in alt_tokens:
+        return "car"
+    if "bike" in alt_tokens or "bicycle" in alt_tokens:
+        return "bicycle"
+    return detections[0]["label"] if detections else "building"
 
 
 def add_word(words: list[dict], seen: set[str], guess: str, reveal: list[int], aliases: list[str] | None = None) -> None:
@@ -304,6 +375,12 @@ def split_person_parts(bbox: list[float], width: int, height: int) -> list[dict]
     ]
 
 
+def add_alt_hint_words(words: list[dict], seen: set[str], alt_tokens: set[str]) -> None:
+    for token in alt_tokens:
+        if token in ALT_REGION_HINTS and token not in seen:
+            add_word(words, seen, token, ALT_REGION_HINTS[token])
+
+
 def build_puzzle(
     date_key: str,
     image_url: str,
@@ -312,7 +389,8 @@ def build_puzzle(
     image_width: int,
     image_height: int,
 ) -> dict:
-    answer = choose_answer(detections)
+    alt_tokens = tokenize_text(image_alt)
+    answer = choose_answer(detections, alt_tokens)
     aliases = ANSWER_ALIASES.get(answer, [])
 
     words: list[dict] = []
@@ -321,7 +399,16 @@ def build_puzzle(
     bicycle_box: list[float] | None = None
     person_box: list[float] | None = None
 
-    for detection in detections:
+    prioritized = sorted(
+        detections,
+        key=lambda item: (
+            label_matches_alt(item["label"], alt_tokens),
+            item["confidence"],
+        ),
+        reverse=True,
+    )
+
+    for detection in prioritized:
         label = detection["label"]
         bbox = detection["bbox"]
 
@@ -351,16 +438,12 @@ def build_puzzle(
             if len(words) >= MAX_WORDS:
                 break
 
-    if not words:
-        center_reveal = convert_bbox_to_reveal(
-            image_width * 0.25,
-            image_height * 0.25,
-            image_width * 0.75,
-            image_height * 0.75,
-            image_width,
-            image_height,
-        )
-        add_word(words, seen, "object", center_reveal, ["item", "thing"])
+    if len(words) < 4:
+        add_alt_hint_words(words, seen, alt_tokens)
+
+    if len(words) < 3:
+        # Use caption-driven words instead of generic object fallback.
+        add_alt_hint_words(words, seen, alt_tokens)
 
     title = f"Daily {answer.title()} Puzzle"
 
@@ -375,8 +458,43 @@ def build_puzzle(
         "gridSize": GRID_SIZE,
         "imageUrl": image_url,
         "imageAlt": image_alt,
-        "words": words,
+        "words": words[:MAX_WORDS],
     }
+
+
+def score_puzzle_quality(puzzle: dict, detections: list[dict], alt_tokens: set[str]) -> int:
+    score = 0
+    if puzzle.get("answer") != "object":
+        score += 2
+    if puzzle.get("answer") in BLAND_ANSWER_LABELS:
+        score -= 4
+    if label_matches_alt(str(puzzle.get("answer", "")), alt_tokens):
+        score += 5
+    score += min(len(puzzle.get("words", [])), 8)
+    score += min(len(detections), 6)
+    return score
+
+
+def is_valid_puzzle(puzzle: dict, detections: list[dict], alt_tokens: set[str]) -> bool:
+    answer = str(puzzle.get("answer", ""))
+    words = puzzle.get("words", [])
+    if not answer or not isinstance(words, list):
+        return False
+    if answer == "object":
+        return False
+    if answer in BLAND_ANSWER_LABELS:
+        return False
+    if len(words) < MIN_REVEAL_WORDS:
+        return False
+    if not detections:
+        return False
+    if answer == "frisbee" and "moon" in alt_tokens:
+        return False
+    if answer in {"sports ball", "frisbee"} and not label_matches_alt(answer, alt_tokens):
+        return False
+    if alt_tokens and not label_matches_alt(answer, alt_tokens):
+        return False
+    return True
 
 
 def main() -> None:
@@ -392,30 +510,55 @@ def main() -> None:
     model_name = os.environ.get("YOLO_MODEL", "yolov8m.pt")
     confidence = float(os.environ.get("YOLO_CONFIDENCE", str(DEFAULT_CONFIDENCE)))
 
-    image_url, image_alt = fetch_unsplash_image(unsplash_access_key, date_key)
+    best_candidate: dict | None = None
+    valid_candidate: dict | None = None
+    best_score = -1
+    seen_urls: set[str] = set()
 
-    with tempfile.TemporaryDirectory(prefix="pixordle-") as temp_dir:
-        image_path = Path(temp_dir) / "daily-image.jpg"
-        download_image(image_url, image_path)
-        detections, image_width, image_height = run_yolo(image_path, model_name, confidence)
+    for _ in range(MAX_IMAGE_ATTEMPTS):
+        image_url, image_alt = fetch_unsplash_image(unsplash_access_key, date_key)
+        if image_url in seen_urls:
+            continue
+        seen_urls.add(image_url)
 
-    puzzle = build_puzzle(
-        date_key=date_key,
-        image_url=image_url,
-        image_alt=image_alt,
-        detections=detections,
-        image_width=image_width,
-        image_height=image_height,
-    )
+        with tempfile.TemporaryDirectory(prefix="pixordle-") as temp_dir:
+            image_path = Path(temp_dir) / "daily-image.jpg"
+            download_image(image_url, image_path)
+            detections, image_width, image_height = run_yolo(image_path, model_name, confidence)
+
+        puzzle = build_puzzle(
+            date_key=date_key,
+            image_url=image_url,
+            image_alt=image_alt,
+            detections=detections,
+            image_width=image_width,
+            image_height=image_height,
+        )
+
+        alt_tokens = tokenize_text(image_alt)
+        quality = score_puzzle_quality(puzzle, detections, alt_tokens)
+        if quality > best_score:
+            best_score = quality
+            best_candidate = puzzle
+
+        if is_valid_puzzle(puzzle, detections, alt_tokens):
+            best_candidate = puzzle
+            valid_candidate = puzzle
+            break
+
+    if not best_candidate or not valid_candidate:
+        raise RuntimeError(
+            "Failed to generate a high-quality puzzle after multiple image attempts. Try again."
+        )
 
     target_dir = Path("data") / "puzzles"
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / f"{date_key}.json"
-    target_path.write_text(f"{json.dumps(puzzle, indent=2)}\n", encoding="utf-8")
+    target_path.write_text(f"{json.dumps(best_candidate, indent=2)}\n", encoding="utf-8")
 
     print(f"Generated puzzle: {target_path}")
-    print(f"Answer: {puzzle['answer']}")
-    print("Reveal words:", ", ".join(word["guess"] for word in puzzle["words"]))
+    print(f"Answer: {best_candidate['answer']}")
+    print("Reveal words:", ", ".join(word["guess"] for word in best_candidate["words"]))
 
 
 if __name__ == "__main__":

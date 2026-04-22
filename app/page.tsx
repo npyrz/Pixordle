@@ -162,17 +162,17 @@ export default function Home() {
     <main className="app">
       <section className="game">
         <header className="topbar">
-          <div>
+          <div className="brandBlock">
             <p className="eyebrow">Image word puzzle</p>
-            <h1>Pixordle</h1>
+            <h1 className="logoWord">Pixordle</h1>
           </div>
           <div className="stats" aria-live="polite">
-            <div>
-              <span>{history.length}</span>
+            <div className="statCard">
+              <span className="statValue">{history.length}</span>
               <small>/{puzzle?.maxGuesses ?? 0} guesses</small>
             </div>
-            <div>
-              <span>{progress}%</span>
+            <div className="statCard">
+              <span className="statValue">{progress}%</span>
               <small>revealed</small>
             </div>
           </div>
@@ -185,14 +185,6 @@ export default function Home() {
             ) : (
               <div className="puzzleImage" />
             )}
-            <div className="maskLayer" aria-hidden="true">
-              {Array.from({ length: (puzzle?.gridSize ?? 10) ** 2 }, (_, index) => (
-                <span
-                  className={revealedTiles.has(index) ? "tile revealed" : "tile"}
-                  key={index}
-                />
-              ))}
-            </div>
             {loading && <div className="loading">Loading puzzle</div>}
           </div>
 

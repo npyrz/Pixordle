@@ -27,9 +27,7 @@ body {
     linear-gradient(315deg, rgba(20, 119, 87, 0.12), transparent 36%),
     #edf3f7;
   color: var(--ink);
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  font-family: "Avenir Next", "Nunito Sans", "Trebuchet MS", "Segoe UI", sans-serif;
 }
 
 button,
@@ -59,19 +57,30 @@ input {
 }
 
 .topbar {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 22px 24px;
+  gap: 28px;
+  padding: 26px 30px;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 12% 12%, rgba(223, 81, 63, 0.17), transparent 48%),
+    radial-gradient(circle at 92% 16%, rgba(20, 119, 87, 0.14), transparent 52%),
+    rgba(255, 255, 255, 0.92);
+}
+
+.brandBlock {
+  min-width: 0;
 }
 
 .eyebrow {
-  margin: 0 0 4px;
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
+  margin: 0 0 8px;
+  color: #5e6e84;
+  font-size: 0.84rem;
+  font-weight: 820;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
@@ -83,9 +92,15 @@ p {
 
 h1 {
   margin-bottom: 0;
-  font-size: clamp(2.2rem, 7vw, 4.2rem);
-  line-height: 0.98;
+  font-size: clamp(2.5rem, 8vw, 5.1rem);
+  line-height: 0.92;
   letter-spacing: 0;
+}
+
+.logoWord {
+  color: #0f1f38;
+  font-weight: 900;
+  text-wrap: balance;
 }
 
 h2 {
@@ -96,35 +111,41 @@ h2 {
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(2, minmax(92px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(142px, 1fr));
+  gap: 14px;
 }
 
-.stats div {
-  min-height: 64px;
+.statCard {
+  min-height: 106px;
   display: grid;
   place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--field);
-  padding: 8px 12px;
+  border: 1px solid #c2ced9;
+  border-radius: 14px;
+  background: rgba(246, 250, 255, 0.88);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.58);
+  padding: 12px;
   text-align: center;
 }
 
-.stats span {
+.statValue {
   display: block;
-  font-size: 1.25rem;
-  font-weight: 850;
+  font-size: 2.4rem;
+  font-weight: 900;
+  line-height: 1;
+  color: #172745;
 }
 
 .stats small {
-  color: var(--muted);
-  font-weight: 750;
+  color: #5e6e84;
+  font-weight: 840;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
 }
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 390px);
+  grid-template-columns: minmax(0, 0.92fr) minmax(320px, 390px);
   gap: 18px;
   align-items: start;
 }
@@ -133,7 +154,8 @@ h2 {
   position: relative;
   overflow: hidden;
   width: 100%;
-  aspect-ratio: 1;
+  aspect-ratio: 4 / 3;
+  max-height: min(68vh, 620px);
   border-radius: 8px;
   background: #cfd9e3;
   box-shadow: var(--shadow);
@@ -148,7 +170,7 @@ h2 {
 }
 
 .puzzleImage {
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .maskLayer {
@@ -331,12 +353,26 @@ button:disabled {
   }
 
   .topbar {
-    align-items: flex-start;
-    padding: 18px;
+    align-items: stretch;
+    gap: 18px;
+    padding: 20px;
   }
 
   .stats {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .statCard {
+    min-height: 90px;
+  }
+
+  .statValue {
+    font-size: 2rem;
+  }
+
+  h1 {
+    font-size: clamp(2.3rem, 14vw, 3.4rem);
   }
 
   .guessRow {

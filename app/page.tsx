@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 
 type PublicPuzzle = {
   id: string;
@@ -179,12 +180,21 @@ export default function Home() {
         </header>
 
         <section className="workspace">
-          <div className="imageStage" aria-label={puzzle?.title ?? "Loading puzzle"}>
+          <div
+            className="imageStage"
+            aria-label={puzzle?.title ?? "Loading puzzle"}
+            style={{ "--grid-size": puzzle?.gridSize ?? 10 } as CSSProperties}
+          >
             {puzzle?.imageUrl ? (
               <img alt={puzzle.imageAlt || puzzle.title} className="puzzleImage" src={puzzle.imageUrl} />
             ) : (
               <div className="puzzleImage" />
             )}
+            <div className="maskLayer" aria-hidden="true">
+              {Array.from({ length: (puzzle?.gridSize ?? 10) ** 2 }, (_, index) => (
+                <span className={revealedTiles.has(index) ? "tile revealed" : "tile"} key={index} />
+              ))}
+            </div>
             {loading && <div className="loading">Loading puzzle</div>}
           </div>
 
@@ -232,9 +242,10 @@ export default function Home() {
                 </button>
               </div>
               <ol>
-                {history.map((entry) => (
+                {history.map((entry, index) => (
                   <li className={entry.kind} key={`${entry.normalized}-${entry.text}`}>
-                    {entry.text}
+                    <span className="guessIndex">{index + 1}.</span>
+                    <span className="guessPill">{entry.text}</span>
                   </li>
                 ))}
               </ol>

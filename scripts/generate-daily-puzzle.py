@@ -19,10 +19,11 @@ except Exception as exc:  # pragma: no cover - runtime dependency check
     ) from exc
 
 BOARD_SIZE = 420
-GRID_SIZE = 10
+GRID_SIZE = 28
 MAX_GUESSES = 6
 DEFAULT_TIMEZONE = "America/Chicago"
 DEFAULT_CONFIDENCE = 0.25
+MAX_WORDS = 8
 
 ANSWER_ALIASES = {
     "bicycle": ["bike", "cycle"],
@@ -30,11 +31,11 @@ ANSWER_ALIASES = {
     "car": ["automobile", "vehicle"],
     "bus": ["coach"],
     "truck": ["lorry"],
-    "person": ["human"],
+    "person": ["human", "rider", "cyclist"],
 }
 
 WORD_ALIASES = {
-    "person": ["people", "human"],
+    "person": ["people", "human", "rider", "cyclist"],
     "car": ["vehicle", "automobile"],
     "motorcycle": ["motorbike", "bike"],
     "bicycle": ["bike", "cycle"],
@@ -45,15 +46,13 @@ WORD_ALIASES = {
     "bench": ["seat"],
     "dog": ["puppy"],
     "cat": ["kitten"],
+    "helmet": ["headgear"],
+    "shoe": ["shoes", "sneaker", "footwear"],
+    "wheel": ["wheels", "tire", "tyre", "rim"],
+    "handlebar": ["handlebars", "bar", "grip"],
+    "seat": ["saddle"],
+    "pedal": ["pedals", "crank"],
 }
-
-FALLBACK_WORDS = [
-    {"guess": "wheel", "aliases": ["wheels", "tire", "tyre"], "reveal": [40, 228, 322, 150]},
-    {"guess": "handlebar", "aliases": ["handlebars", "bar", "grip"], "reveal": [282, 104, 104, 74]},
-    {"guess": "pedal", "aliases": ["pedals", "crank"], "reveal": [196, 294, 66, 62]},
-    {"guess": "seat", "aliases": ["saddle"], "reveal": [152, 146, 74, 56]},
-    {"guess": "frame", "aliases": ["triangle", "body"], "reveal": [112, 176, 196, 142]},
-]
 
 
 def load_env_file(file_path: Path) -> None:
@@ -106,16 +105,16 @@ def convert_bbox_to_reveal(x1: float, y1: float, x2: float, y2: float, width: in
 
     x = clamp(x1 / safe_width, 0.0, 0.98)
     y = clamp(y1 / safe_height, 0.0, 0.98)
-    w = clamp((x2 - x1) / safe_width, 0.04, 1.0)
-    h = clamp((y2 - y1) / safe_height, 0.04, 1.0)
+    w = clamp((x2 - x1) / safe_width, 0.03, 1.0)
+    h = clamp((y2 - y1) / safe_height, 0.03, 1.0)
 
     rx = int(round(x * BOARD_SIZE))
     ry = int(round(y * BOARD_SIZE))
     rw = int(round(w * BOARD_SIZE))
     rh = int(round(h * BOARD_SIZE))
 
-    rw = max(rw, int(round(BOARD_SIZE * 0.07)))
-    rh = max(rh, int(round(BOARD_SIZE * 0.07)))
+    rw = max(rw, int(round(BOARD_SIZE * 0.05)))
+    rh = max(rh, int(round(BOARD_SIZE * 0.05)))
 
     if rx + rw > BOARD_SIZE:
         rw = BOARD_SIZE - rx
@@ -194,6 +193,104 @@ def choose_answer(detections: list[dict]) -> str:
     return "bicycle"
 
 
+def add_word(words: list[dict], seen: set[str], guess: str, reveal: list[int], aliases: list[str] | None = None) -> None:
+    normalized = normalize_word(guess)
+    if not normalized or normalized in seen:
+        return
+
+    words.append(
+        {
+            "guess": normalized,
+            "aliases": aliases if aliases is not None else WORD_ALIASES.get(normalized, []),
+            "reveal": reveal,
+        }
+    )
+    seen.add(normalized)
+
+
+def split_bicycle_parts(bbox: list[float], width: int, height: int) -> list[dict]:
+    x1, y1, x2, y2 = bbox
+    bw = max(x2 - x1, 1)
+    bh = max(y2 - y1, 1)
+
+    left_wheel = convert_bbox_to_reveal(
+        x1 + 0.03 * bw,
+        y1 + 0.55 * bh,
+        x1 + 0.42 * bw,
+        y1 + 0.97 * bh,
+        width,
+        height,
+    )
+    right_wheel = convert_bbox_to_reveal(
+        x1 + 0.58 * bw,
+        y1 + 0.55 * bh,
+        x1 + 0.97 * bw,
+        y1 + 0.97 * bh,
+        width,
+        height,
+    )
+    handlebar = convert_bbox_to_reveal(
+        x1 + 0.62 * bw,
+        y1 + 0.08 * bh,
+        x1 + 0.97 * bw,
+        y1 + 0.36 * bh,
+        width,
+        height,
+    )
+    seat = convert_bbox_to_reveal(
+        x1 + 0.36 * bw,
+        y1 + 0.06 * bh,
+        x1 + 0.58 * bw,
+        y1 + 0.24 * bh,
+        width,
+        height,
+    )
+    pedal = convert_bbox_to_reveal(
+        x1 + 0.42 * bw,
+        y1 + 0.56 * bh,
+        x1 + 0.62 * bw,
+        y1 + 0.79 * bh,
+        width,
+        height,
+    )
+
+    return [
+        {"guess": "wheel", "reveal": left_wheel},
+        {"guess": "tire", "reveal": right_wheel},
+        {"guess": "handlebar", "reveal": handlebar},
+        {"guess": "seat", "reveal": seat},
+        {"guess": "pedal", "reveal": pedal},
+    ]
+
+
+def split_person_parts(bbox: list[float], width: int, height: int) -> list[dict]:
+    x1, y1, x2, y2 = bbox
+    bw = max(x2 - x1, 1)
+    bh = max(y2 - y1, 1)
+
+    helmet = convert_bbox_to_reveal(
+        x1 + 0.28 * bw,
+        y1 + 0.02 * bh,
+        x1 + 0.72 * bw,
+        y1 + 0.22 * bh,
+        width,
+        height,
+    )
+    shoe = convert_bbox_to_reveal(
+        x1 + 0.18 * bw,
+        y1 + 0.78 * bh,
+        x1 + 0.82 * bw,
+        y1 + 0.98 * bh,
+        width,
+        height,
+    )
+
+    return [
+        {"guess": "helmet", "reveal": helmet},
+        {"guess": "shoe", "reveal": shoe},
+    ]
+
+
 def build_puzzle(
     date_key: str,
     image_url: str,
@@ -208,36 +305,49 @@ def build_puzzle(
     words: list[dict] = []
     seen: set[str] = set()
 
+    bicycle_box: list[float] | None = None
+    person_box: list[float] | None = None
+
     for detection in detections:
         label = detection["label"]
-        if label == answer or label in seen:
+        bbox = detection["bbox"]
+
+        if label == "bicycle" and bicycle_box is None:
+            bicycle_box = bbox
+        if label == "person" and person_box is None:
+            person_box = bbox
+
+        if label == answer:
             continue
 
-        x1, y1, x2, y2 = detection["bbox"]
-        reveal = convert_bbox_to_reveal(x1, y1, x2, y2, image_width, image_height)
+        reveal = convert_bbox_to_reveal(bbox[0], bbox[1], bbox[2], bbox[3], image_width, image_height)
+        add_word(words, seen, label, reveal)
 
-        words.append(
-            {
-                "guess": label,
-                "aliases": WORD_ALIASES.get(label, []),
-                "reveal": reveal,
-            }
-        )
-        seen.add(label)
-
-        if len(words) >= 8:
+        if len(words) >= MAX_WORDS:
             break
 
-    for fallback in FALLBACK_WORDS:
-        if len(words) >= 5:
-            break
-        if fallback["guess"] in seen or fallback["guess"] == answer:
-            continue
-        words.append(fallback)
-        seen.add(fallback["guess"])
+    if bicycle_box and len(words) < MAX_WORDS:
+        for item in split_bicycle_parts(bicycle_box, image_width, image_height):
+            add_word(words, seen, item["guess"], item["reveal"])
+            if len(words) >= MAX_WORDS:
+                break
+
+    if person_box and len(words) < MAX_WORDS:
+        for item in split_person_parts(person_box, image_width, image_height):
+            add_word(words, seen, item["guess"], item["reveal"])
+            if len(words) >= MAX_WORDS:
+                break
 
     if not words:
-        raise RuntimeError("YOLO did not produce usable words and fallback failed")
+        center_reveal = convert_bbox_to_reveal(
+            image_width * 0.25,
+            image_height * 0.25,
+            image_width * 0.75,
+            image_height * 0.75,
+            image_width,
+            image_height,
+        )
+        add_word(words, seen, "bicycle", center_reveal, ["bike", "cycle"])
 
     title = f"Daily {answer.title()} Puzzle"
 

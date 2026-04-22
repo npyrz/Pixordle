@@ -7,6 +7,26 @@ const DEFAULT_TIMEZONE = "America/Chicago";
 const DEFAULT_PUZZLE_PATH = path.join(process.cwd(), "data", "puzzles", "default.json");
 const PUZZLE_DIR = path.join(process.cwd(), "data", "puzzles");
 const generationByDate = new Map<string, Promise<boolean>>();
+const EMERGENCY_PUZZLE: Puzzle = {
+  id: "emergency-puzzle",
+  dateKey: "emergency",
+  title: "Emergency Puzzle",
+  answer: "bicycle",
+  aliases: ["bike", "cycle"],
+  maxGuesses: 8,
+  boardSize: 420,
+  gridSize: 32,
+  imageUrl:
+    "https://images.unsplash.com/photo-1485965120184-e220f721d03e?auto=format&fit=crop&w=1200&h=1200&q=80",
+  imageAlt: "a bicycle parked outdoors",
+  words: [
+    { guess: "wheel", aliases: ["wheels", "tire", "tyre", "rim"], reveal: [115, 245, 100, 105] },
+    { guess: "handlebar", aliases: ["handlebars", "bar", "grip"], reveal: [225, 170, 85, 55] },
+    { guess: "seat", aliases: ["saddle"], reveal: [175, 165, 60, 40] },
+    { guess: "pedal", aliases: ["pedals", "crank"], reveal: [198, 260, 62, 58] },
+    { guess: "frame", aliases: ["body", "triangle"], reveal: [150, 190, 145, 98] },
+  ],
+};
 
 function getDateKey(timeZone: string) {
   return new Intl.DateTimeFormat("en-CA", {
@@ -170,6 +190,10 @@ export async function getCurrentPuzzle() {
       // Fall through to default puzzle.
     }
 
-    return await readPuzzleFile(DEFAULT_PUZZLE_PATH);
+    try {
+      return await readPuzzleFile(DEFAULT_PUZZLE_PATH);
+    } catch {
+      return EMERGENCY_PUZZLE;
+    }
   }
 }

@@ -4,19 +4,17 @@ Pixordle is a Next.js image word puzzle. Players guess words that are meaningful
 present in the daily image. Correct related guesses reveal image regions, and a
 final answer guess solves the puzzle.
 
-## How Daily Generation Works
-
-At local midnight (configured timezone), a new date key starts.
+## Production Daily Flow
 
 For each date (`YYYY-MM-DD`):
 
-1. A new image is selected from Unsplash.
-2. The generator runs YOLO object detection on that exact game image.
-3. It chooses a main answer and many reveal words from detected objects.
-4. It maps object boxes to precise reveal coordinates.
-5. It writes `data/puzzles/YYYY-MM-DD.json`.
-
-The app then serves that file for the day.
+1. Select a daily Unsplash topic (deterministic by date).
+2. Fetch a new image from the API.
+3. Run YOLO on that exact image.
+4. Build answer + reveal words from detected objects and bounding boxes.
+5. Validate quality (non-bland answer, minimum reveal words, confidence thresholds).
+6. If quality fails, fetch a different image and retry.
+7. Write `data/puzzles/YYYY-MM-DD.json` only when puzzle quality passes.
 
 ## Stack
 
@@ -30,11 +28,13 @@ The app then serves that file for the day.
 Use `.env` (see `.env.example`):
 
 - `UNSPLASH_ACCESS_KEY` (required)
-- `PIXORDLE_TIMEZONE` (optional, default `America/Chicago`)
-- `YOLO_MODEL` (optional, default `yolov8m.pt`)
-- `YOLO_CONFIDENCE` (optional, default `0.20`)
-- `UNSPLASH_TOPICS` (optional, comma-separated topic pool)
-- `AUTO_GENERATE_DAILY` (optional, set `true` to auto-generate if today's file is missing)
+- `PIXORDLE_TIMEZONE` (timezone for date boundaries)
+- `AUTO_GENERATE_DAILY` (`true`/`false`, API-level fallback generation)
+- `YOLO_MODEL`, `YOLO_CONFIDENCE`, `YOLO_MIN_WORD_CONFIDENCE`
+- `PUZZLE_MIN_REVEAL_WORDS`, `PUZZLE_MAX_REVEAL_WORDS`, `PUZZLE_MAX_IMAGE_ATTEMPTS`
+- `PUZZLE_BLAND_LABELS` (comma-separated labels to reject as answer)
+- `PUZZLE_BOARD_SIZE`, `PUZZLE_GRID_SIZE`, `PUZZLE_MAX_GUESSES`
+- `UNSPLASH_TOPICS` (comma-separated topic pool)
 
 ## Install
 
@@ -63,17 +63,22 @@ Optional date override:
 npm run generate:daily -- --date=2026-04-22
 ```
 
-## Midnight Behavior
+## Generate at 00:00 (Production)
 
-For true scheduled generation exactly at `00:00`, run this script with a cron job or scheduler:
+Use one of these:
+
+1. External scheduler (recommended): cron/systemd/GitHub Actions -> `npm run generate:daily` at `00:00`.
+2. Built-in daemon process:
 
 ```bash
-npm run generate:daily
+npm run generate:daemon
 ```
 
-If you set `AUTO_GENERATE_DAILY=true`, the API will also attempt generation on the first request after midnight when today's file is missing.
+This waits until local midnight in `PIXORDLE_TIMEZONE`, then generates each day.
 
 ## Core API
 
-- `GET /api/puzzle` loads today's puzzle file and returns public metadata.
-- `POST /api/guess` validates guesses against today's puzzle answer and reveal words.
+- `GET /api/puzzle` loads today's puzzle JSON.
+- `POST /api/guess` validates guesses against today's answer/words.
+
+If `AUTO_GENERATE_DAILY=true` and today's file is missing, the API attempts generation on first request.

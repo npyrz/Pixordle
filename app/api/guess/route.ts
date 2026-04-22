@@ -1,0 +1,83 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getTileIndexesForReveal, matchesTerm, normalizeGuess, puzzle } from "@/lib/puzzle";
+
+type GuessRequest = {
+  puzzleId?: string;
+  guess?: string;
+  previousGuesses?: string[];
+  guessesUsed?: number;
+};
+
+export async function POST(request: NextRequest) {
+  const body = (await request.json()) as GuessRequest;
+  const normalizedGuess = normalizeGuess(body.guess ?? "");
+  const previousGuesses = body.previousGuesses ?? [];
+  const guessesUsed = body.guessesUsed ?? previousGuesses.length;
+  const displayGuess = body.guess?.trim() ?? "";
+
+  if (body.puzzleId !== puzzle.id) {
+    return NextResponse.json(
+      {
+        kind: "invalid",
+        message: "Puzzle not found.",
+        normalizedGuess,
+        displayGuess,
+      },
+      { status: 404 },
+    );
+  }
+
+  if (!normalizedGuess) {
+    return NextResponse.json({
+      kind: "invalid",
+      message: "Enter a word to guess.",
+      normalizedGuess,
+      displayGuess,
+    });
+  }
+
+  if (previousGuesses.includes(normalizedGuess)) {
+    return NextResponse.json({
+      kind: "duplicate",
+      message: "You already tried that word.",
+      normalizedGuess,
+      displayGuess,
+    });
+  }
+
+  if (matchesTerm(normalizedGuess, puzzle.answer, puzzle.aliases)) {
+    return NextResponse.json({
+      kind: "answer",
+      message: `Solved. The answer is ${puzzle.answer}.`,
+      normalizedGuess,
+      displayGuess,
+      solved: true,
+    });
+  }
+
+  const matchedWord = puzzle.words.find((word) =>
+    matchesTerm(normalizedGuess, word.guess, word.aliases),
+  );
+
+  if (matchedWord) {
+    return NextResponse.json({
+      kind: "related",
+      message: `${matchedWord.guess} is in the image. A region opened.`,
+      normalizedGuess: matchedWord.guess,
+      displayGuess,
+      reveal: getTileIndexesForReveal(matchedWord.reveal),
+    });
+  }
+
+  const exhausted = guessesUsed + 1 >= puzzle.maxGuesses;
+
+  return NextResponse.json({
+    kind: "miss",
+    message: exhausted
+      ? `Out of guesses. The answer was ${puzzle.answer}.`
+      : "No match. Try another visible clue.",
+    normalizedGuess,
+    displayGuess,
+    exhausted,
+  });
+}

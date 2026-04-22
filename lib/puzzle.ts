@@ -6,50 +6,16 @@ export type PuzzleWord = {
 
 export type Puzzle = {
   id: string;
+  dateKey?: string;
   title: string;
   answer: string;
   aliases: string[];
   maxGuesses: number;
   boardSize: number;
   gridSize: number;
+  imageUrl: string;
+  imageAlt: string;
   words: PuzzleWord[];
-};
-
-export const puzzle: Puzzle = {
-  id: "bicycle-001",
-  title: "Hidden bicycle",
-  answer: "bicycle",
-  aliases: ["bike", "cycle"],
-  maxGuesses: 6,
-  boardSize: 420,
-  gridSize: 10,
-  words: [
-    {
-      guess: "wheel",
-      aliases: ["wheels", "tire", "tyre", "rim"],
-      reveal: [40, 228, 322, 150],
-    },
-    {
-      guess: "handlebar",
-      aliases: ["handlebars", "bar", "grip", "steering"],
-      reveal: [282, 104, 104, 74],
-    },
-    {
-      guess: "pedal",
-      aliases: ["pedals", "crank"],
-      reveal: [196, 294, 66, 62],
-    },
-    {
-      guess: "seat",
-      aliases: ["saddle"],
-      reveal: [152, 146, 74, 56],
-    },
-    {
-      guess: "frame",
-      aliases: ["triangle", "body"],
-      reveal: [112, 176, 196, 142],
-    },
-  ],
 };
 
 export function normalizeGuess(value: string) {
@@ -62,8 +28,8 @@ export function matchesTerm(guess: string, term: string, aliases: string[] = [])
 
 export function getTileIndexesForReveal(
   reveal: PuzzleWord["reveal"],
-  boardSize = puzzle.boardSize,
-  gridSize = puzzle.gridSize,
+  boardSize: number,
+  gridSize: number,
 ) {
   const [x, y, width, height] = reveal;
   const tileSize = boardSize / gridSize;

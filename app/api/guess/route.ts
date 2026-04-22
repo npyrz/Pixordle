@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTileIndexesForReveal, matchesTerm, normalizeGuess, puzzle } from "@/lib/puzzle";
+import { getTileIndexesForReveal, matchesTerm, normalizeGuess } from "@/lib/puzzle";
+import { getCurrentPuzzle } from "@/lib/puzzle-store";
 
 type GuessRequest = {
   puzzleId?: string;
@@ -9,6 +10,7 @@ type GuessRequest = {
 };
 
 export async function POST(request: NextRequest) {
+  const puzzle = await getCurrentPuzzle();
   const body = (await request.json()) as GuessRequest;
   const normalizedGuess = normalizeGuess(body.guess ?? "");
   const previousGuesses = body.previousGuesses ?? [];
@@ -65,7 +67,7 @@ export async function POST(request: NextRequest) {
       message: `${matchedWord.guess} is in the image. A region opened.`,
       normalizedGuess: matchedWord.guess,
       displayGuess,
-      reveal: getTileIndexesForReveal(matchedWord.reveal),
+      reveal: getTileIndexesForReveal(matchedWord.reveal, puzzle.boardSize, puzzle.gridSize),
     });
   }
 

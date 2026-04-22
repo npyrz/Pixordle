@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 type PublicPuzzle = {
   id: string;
@@ -9,6 +9,8 @@ type PublicPuzzle = {
   boardSize: number;
   gridSize: number;
   revealWords: string[];
+  imageUrl: string;
+  imageAlt: string;
 };
 
 type GuessResult = {
@@ -28,6 +30,13 @@ type GuessEntry = {
 };
 
 const defaultMessage = "Find related words to reveal the image, then name the main answer.";
+
+function getMsUntilNextMidnight() {
+  const now = new Date();
+  const nextMidnight = new Date(now);
+  nextMidnight.setHours(24, 0, 0, 0);
+  return nextMidnight.getTime() - now.getTime();
+}
 
 export default function Home() {
   const [puzzle, setPuzzle] = useState<PublicPuzzle | null>(null);
@@ -49,20 +58,41 @@ export default function Home() {
     return Math.round((revealedTiles.size / (puzzle.gridSize * puzzle.gridSize)) * 100);
   }, [puzzle, revealedTiles]);
 
-  useEffect(() => {
-    async function loadPuzzle() {
-      const response = await fetch("/api/puzzle", { cache: "no-store" });
-      const data = (await response.json()) as PublicPuzzle;
-      setPuzzle(data);
-      setLoading(false);
+  const loadPuzzle = useCallback(async (reset = false) => {
+    const response = await fetch("/api/puzzle", { cache: "no-store" });
+    const data = (await response.json()) as PublicPuzzle;
+    setPuzzle(data);
+
+    if (reset) {
+      setGuess("");
+      setMessage(defaultMessage);
+      setTone("neutral");
+      setHistory([]);
+      setRevealedTiles(new Set());
+      setSolved(false);
     }
 
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
     loadPuzzle().catch(() => {
       setMessage("Puzzle failed to load. Refresh and try again.");
       setTone("warning");
       setLoading(false);
     });
-  }, []);
+  }, [loadPuzzle]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      loadPuzzle(true).catch(() => {
+        setMessage("A new daily image was expected, but refresh failed.");
+        setTone("warning");
+      });
+    }, getMsUntilNextMidnight());
+
+    return () => window.clearTimeout(timeout);
+  }, [loadPuzzle]);
 
   async function submitGuess(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -150,7 +180,11 @@ export default function Home() {
 
         <section className="workspace">
           <div className="imageStage" aria-label={puzzle?.title ?? "Loading puzzle"}>
-            <BicycleImage />
+            {puzzle?.imageUrl ? (
+              <img alt={puzzle.imageAlt || puzzle.title} className="puzzleImage" src={puzzle.imageUrl} />
+            ) : (
+              <div className="puzzleImage" />
+            )}
             <div className="maskLayer" aria-hidden="true">
               {Array.from({ length: (puzzle?.gridSize ?? 10) ** 2 }, (_, index) => (
                 <span
@@ -217,42 +251,5 @@ export default function Home() {
         </section>
       </section>
     </main>
-  );
-}
-
-function BicycleImage() {
-  return (
-    <svg className="puzzleImage" viewBox="0 0 420 420" role="img" aria-labelledby="bikeTitle">
-      <title id="bikeTitle">A bicycle illustration</title>
-      <defs>
-        <linearGradient id="frameGradient" x1="0%" x2="100%" y1="0%" y2="100%">
-          <stop offset="0%" stopColor="#eef7f2" />
-          <stop offset="100%" stopColor="#dfeaf8" />
-        </linearGradient>
-        <radialGradient id="wheelShade" cx="50%" cy="50%" r="55%">
-          <stop offset="0%" stopColor="#f9fbfd" />
-          <stop offset="100%" stopColor="#ccd6e3" />
-        </radialGradient>
-      </defs>
-      <rect width="420" height="420" rx="18" fill="url(#frameGradient)" />
-      <path d="M46 332 C112 278, 314 282, 374 332" fill="none" stroke="#b5c7ba" strokeWidth="10" strokeLinecap="round" opacity="0.55" />
-      <circle cx="128" cy="304" r="72" fill="url(#wheelShade)" stroke="#253144" strokeWidth="12" />
-      <circle cx="300" cy="304" r="72" fill="url(#wheelShade)" stroke="#253144" strokeWidth="12" />
-      <circle cx="128" cy="304" r="10" fill="#253144" />
-      <circle cx="300" cy="304" r="10" fill="#253144" />
-      <g stroke="#6b7788" strokeWidth="3" opacity="0.72">
-        <path d="M128 232 L128 376 M56 304 L200 304 M77 253 L179 355 M77 355 L179 253" />
-        <path d="M300 232 L300 376 M228 304 L372 304 M249 253 L351 355 M249 355 L351 253" />
-      </g>
-      <path d="M128 304 L190 205 L252 304 Z" fill="none" stroke="#e2513f" strokeWidth="14" strokeLinejoin="round" />
-      <path d="M190 205 L284 205 L252 304 M284 205 L300 304" fill="none" stroke="#e2513f" strokeWidth="14" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M174 184 H217" stroke="#253144" strokeWidth="14" strokeLinecap="round" />
-      <path d="M284 205 L304 145" stroke="#253144" strokeWidth="12" strokeLinecap="round" />
-      <path d="M304 145 C328 126, 354 130, 367 146" fill="none" stroke="#253144" strokeWidth="12" strokeLinecap="round" />
-      <path d="M191 204 L181 174" stroke="#253144" strokeWidth="10" strokeLinecap="round" />
-      <path d="M162 171 H208" stroke="#253144" strokeWidth="11" strokeLinecap="round" />
-      <path d="M219 314 L237 340" stroke="#253144" strokeWidth="8" strokeLinecap="round" />
-      <path d="M212 315 H246" stroke="#f6b23d" strokeWidth="10" strokeLinecap="round" />
-    </svg>
   );
 }

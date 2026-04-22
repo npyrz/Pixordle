@@ -147,6 +147,10 @@ h2 {
   height: 100%;
 }
 
+.puzzleImage {
+  object-fit: cover;
+}
+
 .maskLayer {
   display: grid;
   grid-template-columns: repeat(10, 1fr);

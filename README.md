@@ -14,10 +14,15 @@ final answer guess solves the puzzle.
 
 ```bash
 npm install
+export UNSPLASH_ACCESS_KEY=your_unsplash_access_key
+# optional, defaults to America/Chicago
+# export PIXORDLE_TIMEZONE=America/Chicago
 npm run dev
 ```
 
 Open `http://localhost:3000`.
+
+Without `UNSPLASH_ACCESS_KEY`, Pixordle uses a built-in bicycle fallback image.
 
 ## Core API
 

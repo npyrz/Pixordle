@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { Puzzle } from "@/lib/puzzle";
 
 const DEFAULT_TIMEZONE = "America/Chicago";
@@ -12,6 +13,7 @@ type CachedPuzzle = {
 };
 
 let cachedPuzzle: CachedPuzzle | null = null;
+const generationByDate = new Map<string, Promise<boolean>>();
 
 function getDateKey(timeZone: string) {
   return new Intl.DateTimeFormat("en-CA", {
@@ -125,6 +127,39 @@ async function readPuzzleFile(filePath: string) {
   return puzzle;
 }
 
+async function generateDailyPuzzleIfEnabled(dateKey: string) {
+  if (process.env.AUTO_GENERATE_DAILY !== "true") {
+    return false;
+  }
+
+  const existing = generationByDate.get(dateKey);
+  if (existing) {
+    return existing;
+  }
+
+  const generation = new Promise<boolean>((resolve) => {
+    const scriptPath = path.join(process.cwd(), "scripts", "generate-daily-puzzle.py");
+    const processHandle = spawn("python3", [scriptPath, `--date=${dateKey}`], {
+      cwd: process.cwd(),
+      stdio: "pipe",
+      env: process.env,
+    });
+
+    processHandle.on("close", (code) => {
+      resolve(code === 0);
+    });
+
+    processHandle.on("error", () => {
+      resolve(false);
+    });
+  }).finally(() => {
+    generationByDate.delete(dateKey);
+  });
+
+  generationByDate.set(dateKey, generation);
+  return generation;
+}
+
 export async function getCurrentPuzzle() {
   const timeZone = process.env.PIXORDLE_TIMEZONE ?? DEFAULT_TIMEZONE;
   const dateKey = getDateKey(timeZone);
@@ -140,6 +175,16 @@ export async function getCurrentPuzzle() {
     cachedPuzzle = { dateKey, puzzle: dailyPuzzle };
     return dailyPuzzle;
   } catch {
+    await generateDailyPuzzleIfEnabled(dateKey);
+
+    try {
+      const generatedPuzzle = await readPuzzleFile(dailyPath);
+      cachedPuzzle = { dateKey, puzzle: generatedPuzzle };
+      return generatedPuzzle;
+    } catch {
+      // Fall through to default puzzle.
+    }
+
     const fallbackPuzzle = await readPuzzleFile(DEFAULT_PUZZLE_PATH);
     cachedPuzzle = { dateKey, puzzle: fallbackPuzzle };
     return fallbackPuzzle;

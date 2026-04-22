@@ -19,11 +19,34 @@ except Exception as exc:  # pragma: no cover - runtime dependency check
     ) from exc
 
 BOARD_SIZE = 420
-GRID_SIZE = 28
-MAX_GUESSES = 6
+GRID_SIZE = 32
+MAX_GUESSES = 8
 DEFAULT_TIMEZONE = "America/Chicago"
-DEFAULT_CONFIDENCE = 0.25
-MAX_WORDS = 8
+DEFAULT_CONFIDENCE = 0.20
+MAX_WORDS = 12
+
+# Avoid weak answers that are too generic for a daily puzzle target.
+GENERIC_ANSWER_LABELS = {
+    "person",
+    "chair",
+    "table",
+    "tv",
+    "cell phone",
+    "cup",
+}
+
+DEFAULT_TOPICS = [
+    "street",
+    "nature",
+    "architecture",
+    "travel",
+    "sports",
+    "food",
+    "city",
+    "ocean",
+    "animals",
+    "fashion",
+]
 
 ANSWER_ALIASES = {
     "bicycle": ["bike", "cycle"],
@@ -99,22 +122,28 @@ def clamp(value: float, low: float, high: float) -> float:
     return min(high, max(low, value))
 
 
+def stable_topic_for_date(date_key: str, configured_topics: list[str]) -> str:
+    topics = configured_topics or DEFAULT_TOPICS
+    score = sum(ord(char) for char in date_key)
+    return topics[score % len(topics)]
+
+
 def convert_bbox_to_reveal(x1: float, y1: float, x2: float, y2: float, width: int, height: int) -> list[int]:
     safe_width = max(width, 1)
     safe_height = max(height, 1)
 
-    x = clamp(x1 / safe_width, 0.0, 0.98)
-    y = clamp(y1 / safe_height, 0.0, 0.98)
-    w = clamp((x2 - x1) / safe_width, 0.03, 1.0)
-    h = clamp((y2 - y1) / safe_height, 0.03, 1.0)
+    x = clamp(x1 / safe_width, 0.0, 0.99)
+    y = clamp(y1 / safe_height, 0.0, 0.99)
+    w = clamp((x2 - x1) / safe_width, 0.02, 1.0)
+    h = clamp((y2 - y1) / safe_height, 0.02, 1.0)
 
     rx = int(round(x * BOARD_SIZE))
     ry = int(round(y * BOARD_SIZE))
     rw = int(round(w * BOARD_SIZE))
     rh = int(round(h * BOARD_SIZE))
 
-    rw = max(rw, int(round(BOARD_SIZE * 0.05)))
-    rh = max(rh, int(round(BOARD_SIZE * 0.05)))
+    rw = max(rw, int(round(BOARD_SIZE * 0.04)))
+    rh = max(rh, int(round(BOARD_SIZE * 0.04)))
 
     if rx + rw > BOARD_SIZE:
         rw = BOARD_SIZE - rx
@@ -124,8 +153,23 @@ def convert_bbox_to_reveal(x1: float, y1: float, x2: float, y2: float, width: in
     return [rx, ry, max(rw, 1), max(rh, 1)]
 
 
-def fetch_unsplash_image(access_key: str) -> tuple[str, str]:
-    query = urllib.parse.urlencode({"query": "bicycle", "orientation": "landscape"})
+def parse_topics_from_env() -> list[str]:
+    raw = os.environ.get("UNSPLASH_TOPICS", "")
+    if not raw.strip():
+        return DEFAULT_TOPICS
+    topics = [normalize_word(item) for item in raw.split(",")]
+    return [topic for topic in topics if topic]
+
+
+def fetch_unsplash_image(access_key: str, date_key: str) -> tuple[str, str]:
+    topic = stable_topic_for_date(date_key, parse_topics_from_env())
+    query = urllib.parse.urlencode(
+        {
+            "query": topic,
+            "orientation": "squarish",
+            "content_filter": "high",
+        }
+    )
     url = f"https://api.unsplash.com/photos/random?{query}"
     request = urllib.request.Request(
         url,
@@ -138,11 +182,17 @@ def fetch_unsplash_image(access_key: str) -> tuple[str, str]:
     with urllib.request.urlopen(request, timeout=30) as response:
         payload = json.loads(response.read().decode("utf-8"))
 
-    image_url = payload.get("urls", {}).get("regular")
-    if not isinstance(image_url, str) or not image_url:
-        raise RuntimeError("Unsplash response missing urls.regular")
+    raw_url = payload.get("urls", {}).get("raw")
+    regular_url = payload.get("urls", {}).get("regular")
+    if isinstance(raw_url, str) and raw_url:
+        joiner = "&" if "?" in raw_url else "?"
+        image_url = f"{raw_url}{joiner}auto=format&fit=crop&crop=entropy&w=1200&h=1200&q=80"
+    elif isinstance(regular_url, str) and regular_url:
+        image_url = regular_url
+    else:
+        raise RuntimeError("Unsplash response missing usable image URL")
 
-    image_alt = payload.get("alt_description") or payload.get("description") or "Daily bicycle-themed photo"
+    image_alt = payload.get("alt_description") or payload.get("description") or f"Daily {topic} photo"
     return image_url, str(image_alt)
 
 
@@ -178,19 +228,19 @@ def run_yolo(image_path: Path, model_name: str, confidence: float) -> tuple[list
 
     unique: dict[str, dict] = {}
     for item in detections:
-        if item["label"] and item["label"] not in unique:
-            unique[item["label"]] = item
+        label = item["label"]
+        if label and label not in unique:
+            unique[label] = item
 
     return list(unique.values()), width, height
 
 
 def choose_answer(detections: list[dict]) -> str:
-    labels = [item["label"] for item in detections]
-    if "bicycle" in labels:
-        return "bicycle"
-    if labels:
-        return labels[0]
-    return "bicycle"
+    for item in detections:
+        label = item["label"]
+        if label not in GENERIC_ANSWER_LABELS:
+            return label
+    return detections[0]["label"] if detections else "object"
 
 
 def add_word(words: list[dict], seen: set[str], guess: str, reveal: list[int], aliases: list[str] | None = None) -> None:
@@ -213,53 +263,27 @@ def split_bicycle_parts(bbox: list[float], width: int, height: int) -> list[dict
     bw = max(x2 - x1, 1)
     bh = max(y2 - y1, 1)
 
-    left_wheel = convert_bbox_to_reveal(
-        x1 + 0.03 * bw,
-        y1 + 0.55 * bh,
-        x1 + 0.42 * bw,
-        y1 + 0.97 * bh,
-        width,
-        height,
-    )
-    right_wheel = convert_bbox_to_reveal(
-        x1 + 0.58 * bw,
-        y1 + 0.55 * bh,
-        x1 + 0.97 * bw,
-        y1 + 0.97 * bh,
-        width,
-        height,
-    )
-    handlebar = convert_bbox_to_reveal(
-        x1 + 0.62 * bw,
-        y1 + 0.08 * bh,
-        x1 + 0.97 * bw,
-        y1 + 0.36 * bh,
-        width,
-        height,
-    )
-    seat = convert_bbox_to_reveal(
-        x1 + 0.36 * bw,
-        y1 + 0.06 * bh,
-        x1 + 0.58 * bw,
-        y1 + 0.24 * bh,
-        width,
-        height,
-    )
-    pedal = convert_bbox_to_reveal(
-        x1 + 0.42 * bw,
-        y1 + 0.56 * bh,
-        x1 + 0.62 * bw,
-        y1 + 0.79 * bh,
-        width,
-        height,
-    )
-
     return [
-        {"guess": "wheel", "reveal": left_wheel},
-        {"guess": "tire", "reveal": right_wheel},
-        {"guess": "handlebar", "reveal": handlebar},
-        {"guess": "seat", "reveal": seat},
-        {"guess": "pedal", "reveal": pedal},
+        {
+            "guess": "wheel",
+            "reveal": convert_bbox_to_reveal(x1 + 0.03 * bw, y1 + 0.55 * bh, x1 + 0.42 * bw, y1 + 0.97 * bh, width, height),
+        },
+        {
+            "guess": "tire",
+            "reveal": convert_bbox_to_reveal(x1 + 0.58 * bw, y1 + 0.55 * bh, x1 + 0.97 * bw, y1 + 0.97 * bh, width, height),
+        },
+        {
+            "guess": "handlebar",
+            "reveal": convert_bbox_to_reveal(x1 + 0.62 * bw, y1 + 0.08 * bh, x1 + 0.97 * bw, y1 + 0.36 * bh, width, height),
+        },
+        {
+            "guess": "seat",
+            "reveal": convert_bbox_to_reveal(x1 + 0.36 * bw, y1 + 0.06 * bh, x1 + 0.58 * bw, y1 + 0.24 * bh, width, height),
+        },
+        {
+            "guess": "pedal",
+            "reveal": convert_bbox_to_reveal(x1 + 0.42 * bw, y1 + 0.56 * bh, x1 + 0.62 * bw, y1 + 0.79 * bh, width, height),
+        },
     ]
 
 
@@ -268,26 +292,15 @@ def split_person_parts(bbox: list[float], width: int, height: int) -> list[dict]
     bw = max(x2 - x1, 1)
     bh = max(y2 - y1, 1)
 
-    helmet = convert_bbox_to_reveal(
-        x1 + 0.28 * bw,
-        y1 + 0.02 * bh,
-        x1 + 0.72 * bw,
-        y1 + 0.22 * bh,
-        width,
-        height,
-    )
-    shoe = convert_bbox_to_reveal(
-        x1 + 0.18 * bw,
-        y1 + 0.78 * bh,
-        x1 + 0.82 * bw,
-        y1 + 0.98 * bh,
-        width,
-        height,
-    )
-
     return [
-        {"guess": "helmet", "reveal": helmet},
-        {"guess": "shoe", "reveal": shoe},
+        {
+            "guess": "helmet",
+            "reveal": convert_bbox_to_reveal(x1 + 0.28 * bw, y1 + 0.02 * bh, x1 + 0.72 * bw, y1 + 0.22 * bh, width, height),
+        },
+        {
+            "guess": "shoe",
+            "reveal": convert_bbox_to_reveal(x1 + 0.18 * bw, y1 + 0.78 * bh, x1 + 0.82 * bw, y1 + 0.98 * bh, width, height),
+        },
     ]
 
 
@@ -347,7 +360,7 @@ def build_puzzle(
             image_width,
             image_height,
         )
-        add_word(words, seen, "bicycle", center_reveal, ["bike", "cycle"])
+        add_word(words, seen, "object", center_reveal, ["item", "thing"])
 
     title = f"Daily {answer.title()} Puzzle"
 
@@ -376,10 +389,10 @@ def main() -> None:
     timezone_name = os.environ.get("PIXORDLE_TIMEZONE", DEFAULT_TIMEZONE)
     date_key = parse_date_arg() or get_date_key(timezone_name)
 
-    model_name = os.environ.get("YOLO_MODEL", "yolov8n.pt")
+    model_name = os.environ.get("YOLO_MODEL", "yolov8m.pt")
     confidence = float(os.environ.get("YOLO_CONFIDENCE", str(DEFAULT_CONFIDENCE)))
 
-    image_url, image_alt = fetch_unsplash_image(unsplash_access_key)
+    image_url, image_alt = fetch_unsplash_image(unsplash_access_key, date_key)
 
     with tempfile.TemporaryDirectory(prefix="pixordle-") as temp_dir:
         image_path = Path(temp_dir) / "daily-image.jpg"

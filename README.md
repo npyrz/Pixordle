@@ -10,8 +10,8 @@ The experience is similar to Wordle in cadence and vocabulary matching, but the 
 - The source image is selected from Unsplash.
 - YOLO object detection identifies objects in the selected image.
 - Each detected object stores its label, confidence score, source-image bounding box, aliases, and board reveal region.
-- The strongest non-bland detection becomes the main answer.
-- Other high-confidence detections become reveal words.
+- The strongest non-bland detection becomes the main answer when possible.
+- Other high-confidence detections become reveal words, including common objects that may be too bland for the final answer.
 - Close helper words are accepted, such as plurals and common synonyms.
 - Guessing a reveal word uncovers that object's image region.
 - Guessing the main answer solves the puzzle and reveals the full image.
@@ -72,13 +72,13 @@ flowchart TD
 Generation steps:
 
 1. Resolve today's date in `PIXORDLE_TIMEZONE`.
-2. Pick a deterministic topic from `UNSPLASH_TOPICS`.
-3. Fetch a random squarish Unsplash image for that topic.
+2. Pick the first topic deterministically from `UNSPLASH_TOPICS`, then rotate through the topic pool on retries.
+3. Fetch a random squarish Unsplash image for the current topic.
 4. Download the selected image.
 5. Run YOLO using `YOLO_MODEL`.
 6. Deduplicate detections by label, keeping the highest-confidence box.
-7. Reject low-confidence or bland labels.
-8. Choose the main answer.
+7. Reject low-confidence labels.
+8. Choose the main answer, preferring non-bland labels but falling back to the strongest usable detection.
 9. Convert detection bounding boxes into Pixordle board reveal regions.
 10. Attach aliases and helper words.
 11. Save the final puzzle JSON.
@@ -188,10 +188,10 @@ Create `.env` from `.env.example`.
 | `YOLO_MODEL` | YOLO model file, for example `yolov8m.pt`. |
 | `YOLO_CONFIDENCE` | Minimum detection confidence passed to YOLO prediction. |
 | `YOLO_MIN_WORD_CONFIDENCE` | Minimum confidence for answer and reveal word candidates. |
-| `PUZZLE_MIN_REVEAL_WORDS` | Required number of reveal words for a valid puzzle. |
+| `PUZZLE_MIN_REVEAL_WORDS` | Required number of reveal words for a valid puzzle. Default: `3`. |
 | `PUZZLE_MAX_REVEAL_WORDS` | Maximum reveal words stored in a puzzle. |
-| `PUZZLE_MAX_IMAGE_ATTEMPTS` | Number of Unsplash images to try before failing generation. |
-| `PUZZLE_BLAND_LABELS` | Labels that should not become the main answer. |
+| `PUZZLE_MAX_IMAGE_ATTEMPTS` | Number of Unsplash images to try before failing generation. Default: `25`. |
+| `PUZZLE_BLAND_LABELS` | Labels that are avoided as the main answer when a stronger answer exists. They can still be reveal words. |
 | `PUZZLE_BOARD_SIZE` | Reveal coordinate system size. |
 | `PUZZLE_GRID_SIZE` | Number of mask tiles per axis. |
 | `PUZZLE_MAX_GUESSES` | Guess limit per puzzle. |

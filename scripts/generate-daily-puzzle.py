@@ -182,9 +182,9 @@ def parse_config() -> Config:
         yolo_model=os.environ.get("YOLO_MODEL", "yolov8m.pt"),
         yolo_confidence=float(os.environ.get("YOLO_CONFIDENCE", "0.2")),
         yolo_min_word_confidence=float(os.environ.get("YOLO_MIN_WORD_CONFIDENCE", "0.25")),
-        min_reveal_words=int(os.environ.get("PUZZLE_MIN_REVEAL_WORDS", "5")),
+        min_reveal_words=int(os.environ.get("PUZZLE_MIN_REVEAL_WORDS", "3")),
         max_reveal_words=int(os.environ.get("PUZZLE_MAX_REVEAL_WORDS", "12")),
-        max_image_attempts=int(os.environ.get("PUZZLE_MAX_IMAGE_ATTEMPTS", "10")),
+        max_image_attempts=int(os.environ.get("PUZZLE_MAX_IMAGE_ATTEMPTS", "25")),
         bland_labels=parse_set_env("PUZZLE_BLAND_LABELS", DEFAULT_BLAND_LABELS),
         topics=parse_list_env("UNSPLASH_TOPICS", DEFAULT_TOPICS),
     )
@@ -216,6 +216,12 @@ def parse_args() -> tuple[Optional[str], bool]:
 def stable_topic_for_date(date_key: str, topics: list[str]) -> str:
     score = sum(ord(char) for char in date_key)
     return topics[score % len(topics)]
+
+
+def topic_for_attempt(date_key: str, topics: list[str], attempt_index: int) -> str:
+    first_topic = stable_topic_for_date(date_key, topics)
+    start_index = topics.index(first_topic)
+    return topics[(start_index + attempt_index) % len(topics)]
 
 
 def read_json_from_request(request: urllib.request.Request) -> dict:
@@ -317,6 +323,13 @@ def choose_answer(detections: list[Detection], config: Config) -> Optional[str]:
         if item.confidence < config.yolo_min_word_confidence:
             continue
         return item.label
+
+    # Prefer a non-bland answer, but do not fail a usable image just because
+    # all detections are common objects. The reveal words still come from boxes.
+    for item in sorted_items:
+        if item.confidence >= config.yolo_min_word_confidence:
+            return item.label
+
     return None
 
 
@@ -426,8 +439,6 @@ def build_puzzle(
     for item in sorted_items:
         if item.label == answer:
             continue
-        if item.label in config.bland_labels:
-            continue
         if item.confidence < config.yolo_min_word_confidence:
             continue
         if item.label in seen:
@@ -471,9 +482,10 @@ def build_puzzle(
 
 def generate_puzzle(date_key: str, config: Config, access_key: str) -> dict:
     seen_urls: set[str] = set()
-    topic = stable_topic_for_date(date_key, config.topics)
+    attempt_notes: list[str] = []
 
-    for _ in range(config.max_image_attempts):
+    for attempt_index in range(config.max_image_attempts):
+        topic = topic_for_attempt(date_key, config.topics, attempt_index)
         image_url, image_alt = fetch_unsplash_image(access_key, topic)
         if image_url in seen_urls:
             continue
@@ -483,6 +495,11 @@ def generate_puzzle(date_key: str, config: Config, access_key: str) -> dict:
             image_path = Path(temp_dir) / "daily-image.jpg"
             download_image(image_url, image_path)
             detections, image_width, image_height = run_yolo(image_path, config)
+
+        candidate_count = sum(
+            1 for item in detections if item.confidence >= config.yolo_min_word_confidence
+        )
+        attempt_notes.append(f"{topic}: {candidate_count} usable detections")
 
         puzzle = build_puzzle(
             date_key=date_key,
@@ -498,7 +515,8 @@ def generate_puzzle(date_key: str, config: Config, access_key: str) -> dict:
 
     raise RuntimeError(
         "Failed to generate a high-quality puzzle after multiple attempts. "
-        "Try a different topic pool or lower strictness thresholds."
+        "Try a different topic pool or lower strictness thresholds. "
+        f"Attempts: {'; '.join(attempt_notes[-8:])}"
     )
 
 

@@ -179,7 +179,6 @@ h2 {
   display: grid;
   grid-template-columns: repeat(var(--grid-size), 1fr);
   grid-template-rows: repeat(var(--grid-size), 1fr);
-  background: #0d1724;
 }
 
 .tile {

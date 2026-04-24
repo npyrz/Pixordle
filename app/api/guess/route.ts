@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTileIndexesForReveal, matchesTerm, normalizeGuess } from "@/lib/puzzle";
+import {
+  getTileIndexesForReveal,
+  hasEquivalentPreviousGuess,
+  matchesTerm,
+  normalizeGuess,
+} from "@/lib/puzzle";
 import { getCurrentPuzzle } from "@/lib/puzzle-store";
 
 type GuessRequest = {
@@ -38,10 +43,10 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  if (previousGuesses.includes(normalizedGuess)) {
+  if (hasEquivalentPreviousGuess(normalizedGuess, previousGuesses, puzzle)) {
     return NextResponse.json({
       kind: "duplicate",
-      message: "You already tried that word.",
+      message: "You already tried that word or a close helper word.",
       normalizedGuess,
       displayGuess,
     });

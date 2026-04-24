@@ -1,0 +1,111 @@
+{
+  "id": "bicycle-default",
+  "dateKey": "default",
+  "title": "Default Bicycle Puzzle",
+  "answer": "bicycle",
+  "aliases": [
+    "bike",
+    "cycle",
+    "bicycles"
+  ],
+  "maxGuesses": 8,
+  "boardSize": 420,
+  "gridSize": 32,
+  "imageUrl": "https://images.unsplash.com/photo-1485965120184-e220f721d03e?auto=format&fit=crop&w=1200&h=1200&q=80",
+  "imageAlt": "a bicycle parked outdoors",
+  "imageSize": {
+    "width": 1200,
+    "height": 1200
+  },
+  "words": [
+    {
+      "guess": "wheel",
+      "aliases": [
+        "wheels",
+        "tire",
+        "tyre",
+        "rim"
+      ],
+      "reveal": [
+        115,
+        245,
+        100,
+        105
+      ],
+      "confidence": 0.98
+    },
+    {
+      "guess": "handlebar",
+      "aliases": [
+        "handlebars",
+        "bar",
+        "grip"
+      ],
+      "reveal": [
+        225,
+        170,
+        85,
+        55
+      ],
+      "confidence": 0.92
+    },
+    {
+      "guess": "seat",
+      "aliases": [
+        "saddle"
+      ],
+      "reveal": [
+        175,
+        165,
+        60,
+        40
+      ],
+      "confidence": 0.89
+    },
+    {
+      "guess": "pedal",
+      "aliases": [
+        "pedals",
+        "crank"
+      ],
+      "reveal": [
+        198,
+        260,
+        62,
+        58
+      ],
+      "confidence": 0.84
+    },
+    {
+      "guess": "frame",
+      "aliases": [
+        "body",
+        "triangle"
+      ],
+      "reveal": [
+        150,
+        190,
+        145,
+        98
+      ],
+      "confidence": 0.81
+    }
+  ],
+  "detections": [
+    {
+      "label": "bicycle",
+      "aliases": [
+        "bike",
+        "cycle",
+        "bicycles"
+      ],
+      "confidence": 0.98,
+      "bbox": [
+        110,
+        165,
+        330,
+        350
+      ]
+    }
+  ]
+}

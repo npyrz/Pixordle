@@ -62,6 +62,51 @@ LABEL_ALIASES = {
     "person": ["people", "human"],
     "dog": ["puppy"],
     "cat": ["kitten"],
+    "bird": ["animal"],
+    "horse": ["pony", "animal"],
+    "sheep": ["lamb", "animal"],
+    "cow": ["cattle", "animal"],
+    "elephant": ["animal"],
+    "bear": ["animal"],
+    "zebra": ["animal"],
+    "giraffe": ["animal"],
+    "backpack": ["bag", "rucksack"],
+    "handbag": ["bag", "purse"],
+    "suitcase": ["luggage", "case"],
+    "sports ball": ["ball"],
+    "baseball bat": ["bat"],
+    "baseball glove": ["glove"],
+    "skateboard": ["board"],
+    "surfboard": ["surf board", "board"],
+    "tennis racket": ["racket", "racquet"],
+    "wine glass": ["glass"],
+    "cup": ["mug"],
+    "fork": ["utensil"],
+    "knife": ["utensil"],
+    "spoon": ["utensil"],
+    "bowl": ["dish"],
+    "banana": ["fruit"],
+    "apple": ["fruit"],
+    "orange": ["fruit"],
+    "broccoli": ["vegetable", "veg"],
+    "carrot": ["vegetable", "veg"],
+    "hot dog": ["hotdog"],
+    "pizza": ["food"],
+    "donut": ["doughnut", "food"],
+    "cake": ["dessert", "food"],
+    "couch": ["sofa", "settee"],
+    "potted plant": ["plant", "houseplant"],
+    "dining table": ["table"],
+    "tv": ["television", "screen"],
+    "laptop": ["computer"],
+    "mouse": ["computer mouse"],
+    "remote": ["remote control"],
+    "cell phone": ["phone", "mobile phone", "smartphone"],
+    "book": ["novel"],
+    "clock": ["watch", "timepiece"],
+    "vase": ["pot"],
+    "teddy bear": ["stuffed bear", "plush bear"],
+    "hair drier": ["hair dryer", "dryer"],
 }
 
 
@@ -153,13 +198,19 @@ def get_date_key(timezone_name: str) -> str:
     return now.strftime("%Y-%m-%d")
 
 
-def parse_date_arg() -> Optional[str]:
+def parse_args() -> tuple[Optional[str], bool]:
+    date_key = None
+    force = False
+
     for arg in sys.argv[1:]:
         if arg.startswith("--date="):
             value = arg.split("=", 1)[1].strip()
             if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
-                return value
-    return None
+                date_key = value
+        elif arg == "--force":
+            force = True
+
+    return date_key, force
 
 
 def stable_topic_for_date(date_key: str, topics: list[str]) -> str:
@@ -296,8 +347,63 @@ def convert_bbox_to_reveal(bbox: list[float], width: int, height: int, board_siz
     return [rx, ry, max(rw, 1), max(rh, 1)]
 
 
+def pluralize(label: str) -> Optional[str]:
+    if label.endswith("s"):
+        return None
+    if label.endswith("y") and len(label) > 1 and label[-2] not in "aeiou":
+        return f"{label[:-1]}ies"
+    if label.endswith(("s", "x", "ch", "sh")):
+        return f"{label}es"
+    return f"{label}s"
+
+
+def singularize(label: str) -> Optional[str]:
+    if label.endswith("ies") and len(label) > 3:
+        return f"{label[:-3]}y"
+    if label.endswith("es") and label[:-2].endswith(("s", "x", "ch", "sh")):
+        return label[:-2]
+    if label.endswith("s") and len(label) > 1:
+        return label[:-1]
+    return None
+
+
 def aliases_for_label(label: str) -> list[str]:
-    return LABEL_ALIASES.get(label, [])
+    normalized_label = normalize_word(label)
+    aliases: list[str] = []
+
+    for alias in LABEL_ALIASES.get(normalized_label, []):
+        aliases.append(alias)
+
+    plural = pluralize(normalized_label)
+    singular = singularize(normalized_label)
+    if plural:
+        aliases.append(plural)
+    if singular:
+        aliases.append(singular)
+
+    parts = normalized_label.split()
+    if len(parts) > 1 and len(parts[-1]) > 2:
+        aliases.append(parts[-1])
+
+    deduped: list[str] = []
+    seen: set[str] = {normalized_label}
+    for alias in aliases:
+        normalized_alias = normalize_word(alias)
+        if not normalized_alias or normalized_alias in seen:
+            continue
+        seen.add(normalized_alias)
+        deduped.append(normalized_alias)
+
+    return deduped
+
+
+def serialize_detection(item: Detection) -> dict:
+    return {
+        "label": item.label,
+        "aliases": aliases_for_label(item.label),
+        "confidence": round(item.confidence, 4),
+        "bbox": [round(value, 2) for value in item.bbox],
+    }
 
 
 def build_puzzle(
@@ -332,6 +438,7 @@ def build_puzzle(
                 "guess": item.label,
                 "aliases": aliases_for_label(item.label),
                 "reveal": convert_bbox_to_reveal(item.bbox, image_width, image_height, config.board_size),
+                "confidence": round(item.confidence, 4),
             }
         )
         seen.add(item.label)
@@ -353,7 +460,12 @@ def build_puzzle(
         "gridSize": config.grid_size,
         "imageUrl": image_url,
         "imageAlt": image_alt,
+        "imageSize": {
+            "width": image_width,
+            "height": image_height,
+        },
         "words": words,
+        "detections": [serialize_detection(item) for item in sorted_items],
     }
 
 
@@ -394,16 +506,23 @@ def main() -> None:
     load_env_file(Path(".env"))
     config = parse_config()
 
+    target_dir = Path("data") / "puzzles"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    date_arg, force = parse_args()
+    date_key = date_arg or get_date_key(config.timezone)
+    target_path = target_dir / f"{date_key}.json"
+    if target_path.exists() and not force:
+        print(f"Puzzle already exists: {target_path}")
+        print("Use --force to replace it.")
+        return
+
     unsplash_access_key = os.environ.get("UNSPLASH_ACCESS_KEY")
     if not unsplash_access_key:
         raise RuntimeError("UNSPLASH_ACCESS_KEY is required")
 
-    date_key = parse_date_arg() or get_date_key(config.timezone)
     puzzle = generate_puzzle(date_key=date_key, config=config, access_key=unsplash_access_key)
 
-    target_dir = Path("data") / "puzzles"
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / f"{date_key}.json"
     target_path.write_text(f"{json.dumps(puzzle, indent=2)}\n", encoding="utf-8")
 
     print(f"Generated puzzle: {target_path}")

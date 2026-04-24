@@ -2,6 +2,7 @@ export type PuzzleWord = {
   guess: string;
   aliases: string[];
   reveal: [number, number, number, number];
+  confidence?: number;
 };
 
 export type Puzzle = {
@@ -15,7 +16,17 @@ export type Puzzle = {
   gridSize: number;
   imageUrl: string;
   imageAlt: string;
+  imageSize?: {
+    width: number;
+    height: number;
+  };
   words: PuzzleWord[];
+  detections?: Array<{
+    label: string;
+    confidence: number;
+    bbox: [number, number, number, number];
+    aliases: string[];
+  }>;
 };
 
 export function normalizeGuess(value: string) {
@@ -24,6 +35,20 @@ export function normalizeGuess(value: string) {
 
 export function matchesTerm(guess: string, term: string, aliases: string[] = []) {
   return [term, ...aliases].some((candidate) => guess === normalizeGuess(candidate));
+}
+
+export function getCanonicalGuess(guess: string, puzzle: Puzzle) {
+  if (matchesTerm(guess, puzzle.answer, puzzle.aliases)) {
+    return puzzle.answer;
+  }
+
+  const matchedWord = puzzle.words.find((word) => matchesTerm(guess, word.guess, word.aliases));
+  return matchedWord?.guess ?? guess;
+}
+
+export function hasEquivalentPreviousGuess(guess: string, previousGuesses: string[], puzzle: Puzzle) {
+  const canonicalGuess = getCanonicalGuess(guess, puzzle);
+  return previousGuesses.some((previousGuess) => getCanonicalGuess(previousGuess, puzzle) === canonicalGuess);
 }
 
 export function getTileIndexesForReveal(

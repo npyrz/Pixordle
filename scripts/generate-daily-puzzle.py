@@ -21,27 +21,32 @@ except Exception as exc:  # pragma: no cover - runtime dependency check
         "ultralytics is required. Install with: pip install -r requirements.txt"
     ) from exc
 
-DEFAULT_TOPICS = [
-    "pets",
-    "park",
-    "street",
-    "city",
-    "beach",
-    "kitchen",
-    "dining",
-    "food",
-    "market",
-    "sports",
-    "playground",
-    "home",
-    "office",
-    "garden",
-    "farm",
-    "transportation",
+DEFAULT_SCENE_QUERIES = [
+    "breakfast table",
+    "kitchen counter",
+    "office desk",
+    "coffee table",
+    "picnic table",
+    "living room table",
+    "desk setup",
+    "pizza table",
+    "fruit market",
+    "workbench tools",
+    "bathroom sink",
+    "sports equipment",
+    "bedside table",
+    "bookshelf still life",
+    "food flat lay",
+    "tabletop still life",
+    "dinner table",
+    "artist desk",
+    "restaurant table",
+    "baking counter",
 ]
 
 DEFAULT_BLAND_LABELS = {
     "building",
+    "dining table",
     "sky",
     "moon",
     "person",
@@ -128,12 +133,15 @@ class Config:
     yolo_min_word_confidence: float
     yolo_min_answer_confidence: float
     yolo_min_answer_area: float
+    yolo_max_answer_area: float
     yolo_min_reveal_area: float
+    yolo_max_reveal_area: float
     min_reveal_words: int
     max_reveal_words: int
     max_image_attempts: int
+    min_puzzle_score: float
     bland_labels: set[str]
-    topics: list[str]
+    scene_queries: list[str]
 
 
 def load_env_file(file_path: Path) -> None:
@@ -186,13 +194,16 @@ def parse_config() -> Config:
         yolo_confidence=float(os.environ.get("YOLO_CONFIDENCE", "0.2")),
         yolo_min_word_confidence=float(os.environ.get("YOLO_MIN_WORD_CONFIDENCE", "0.25")),
         yolo_min_answer_confidence=float(os.environ.get("YOLO_MIN_ANSWER_CONFIDENCE", "0.45")),
-        yolo_min_answer_area=float(os.environ.get("YOLO_MIN_ANSWER_AREA", "0.015")),
+        yolo_min_answer_area=float(os.environ.get("YOLO_MIN_ANSWER_AREA", "0.025")),
+        yolo_max_answer_area=float(os.environ.get("YOLO_MAX_ANSWER_AREA", "0.45")),
         yolo_min_reveal_area=float(os.environ.get("YOLO_MIN_REVEAL_AREA", "0.003")),
+        yolo_max_reveal_area=float(os.environ.get("YOLO_MAX_REVEAL_AREA", "0.22")),
         min_reveal_words=int(os.environ.get("PUZZLE_MIN_REVEAL_WORDS", "3")),
         max_reveal_words=int(os.environ.get("PUZZLE_MAX_REVEAL_WORDS", "12")),
-        max_image_attempts=int(os.environ.get("PUZZLE_MAX_IMAGE_ATTEMPTS", "25")),
+        max_image_attempts=int(os.environ.get("PUZZLE_MAX_IMAGE_ATTEMPTS", "40")),
+        min_puzzle_score=float(os.environ.get("PUZZLE_MIN_SCORE", "8.0")),
         bland_labels=parse_set_env("PUZZLE_BLAND_LABELS", DEFAULT_BLAND_LABELS),
-        topics=parse_list_env("UNSPLASH_TOPICS", DEFAULT_TOPICS),
+        scene_queries=parse_list_env("UNSPLASH_QUERIES", DEFAULT_SCENE_QUERIES),
     )
 
 
@@ -219,15 +230,15 @@ def parse_args() -> tuple[Optional[str], bool]:
     return date_key, force
 
 
-def stable_topic_for_date(date_key: str, topics: list[str]) -> str:
+def stable_query_for_date(date_key: str, queries: list[str]) -> str:
     score = sum(ord(char) for char in date_key)
-    return topics[score % len(topics)]
+    return queries[score % len(queries)]
 
 
-def topic_for_attempt(date_key: str, topics: list[str], attempt_index: int) -> str:
-    first_topic = stable_topic_for_date(date_key, topics)
-    start_index = topics.index(first_topic)
-    return topics[(start_index + attempt_index) % len(topics)]
+def query_for_attempt(date_key: str, queries: list[str], attempt_index: int) -> str:
+    first_query = stable_query_for_date(date_key, queries)
+    start_index = queries.index(first_query)
+    return queries[(start_index + attempt_index) % len(queries)]
 
 
 def read_json_from_request(request: urllib.request.Request) -> dict:
@@ -244,10 +255,10 @@ def read_json_from_request(request: urllib.request.Request) -> dict:
         raise RuntimeError(f"Unsplash request failed ({error.code}): {detail}") from error
 
 
-def fetch_unsplash_image(access_key: str, topic: str) -> tuple[str, str]:
+def fetch_unsplash_image(access_key: str, query_text: str) -> tuple[str, str]:
     query = urllib.parse.urlencode(
         {
-            "query": topic,
+            "query": query_text,
             "orientation": "squarish",
             "content_filter": "high",
         }
@@ -275,7 +286,7 @@ def fetch_unsplash_image(access_key: str, topic: str) -> tuple[str, str]:
     else:
         raise RuntimeError("Unsplash response missing usable image URL")
 
-    image_alt = payload.get("alt_description") or payload.get("description") or f"Daily {topic} photo"
+    image_alt = payload.get("alt_description") or payload.get("description") or f"Daily {query_text} photo"
     return image_url, str(image_alt)
 
 
@@ -329,18 +340,51 @@ def bbox_area_ratio(item: Detection, image_width: int, image_height: int) -> flo
     return (box_width * box_height) / image_area
 
 
+def bbox_center(item: Detection, image_width: int, image_height: int) -> tuple[float, float]:
+    x1, y1, x2, y2 = item.bbox
+    safe_width = max(image_width, 1)
+    safe_height = max(image_height, 1)
+    return ((x1 + x2) / 2 / safe_width, (y1 + y2) / 2 / safe_height)
+
+
+def center_score(item: Detection, image_width: int, image_height: int) -> float:
+    cx, cy = bbox_center(item, image_width, image_height)
+    distance = ((cx - 0.5) ** 2 + (cy - 0.5) ** 2) ** 0.5
+    return clamp(1 - distance / 0.707, 0.0, 1.0)
+
+
+def answer_focus_score(item: Detection, image_width: int, image_height: int) -> float:
+    area = bbox_area_ratio(item, image_width, image_height)
+    target_area = 0.18
+    area_score = clamp(area / target_area, 0.0, 1.0)
+    huge_penalty = max(area - 0.34, 0.0) * 4
+    return (item.confidence * 3) + (area_score * 2) + (center_score(item, image_width, image_height) * 2) - huge_penalty
+
+
+def reveal_word_score(item: Detection, image_width: int, image_height: int) -> float:
+    area = bbox_area_ratio(item, image_width, image_height)
+    area_score = clamp(area / 0.08, 0.0, 1.0)
+    return (item.confidence * 2) + area_score + center_score(item, image_width, image_height)
+
+
 def is_answer_candidate(item: Detection, image_width: int, image_height: int, config: Config) -> bool:
+    area = bbox_area_ratio(item, image_width, image_height)
     if item.confidence < config.yolo_min_answer_confidence:
         return False
-    if bbox_area_ratio(item, image_width, image_height) < config.yolo_min_answer_area:
+    if area < config.yolo_min_answer_area:
+        return False
+    if area > config.yolo_max_answer_area:
         return False
     return True
 
 
 def is_reveal_candidate(item: Detection, image_width: int, image_height: int, config: Config) -> bool:
+    area = bbox_area_ratio(item, image_width, image_height)
     if item.confidence < config.yolo_min_word_confidence:
         return False
-    if bbox_area_ratio(item, image_width, image_height) < config.yolo_min_reveal_area:
+    if area < config.yolo_min_reveal_area:
+        return False
+    if area > config.yolo_max_reveal_area:
         return False
     return True
 
@@ -351,7 +395,11 @@ def choose_answer(
     image_height: int,
     config: Config,
 ) -> Optional[str]:
-    sorted_items = sorted(detections, key=lambda item: item.confidence, reverse=True)
+    sorted_items = sorted(
+        detections,
+        key=lambda item: answer_focus_score(item, image_width, image_height),
+        reverse=True,
+    )
     for item in sorted_items:
         if item.label in config.bland_labels:
             continue
@@ -366,6 +414,27 @@ def choose_answer(
             return item.label
 
     return None
+
+
+def score_puzzle(
+    answer: str,
+    words: list[dict],
+    detections: list[Detection],
+    image_width: int,
+    image_height: int,
+    config: Config,
+) -> float:
+    answer_detection = next((item for item in detections if item.label == answer), None)
+    if answer_detection is None:
+        return 0.0
+
+    reveal_labels = {word["guess"] for word in words}
+    reveal_detections = [item for item in detections if item.label in reveal_labels]
+    answer_score = answer_focus_score(answer_detection, image_width, image_height)
+    reveal_score = sum(reveal_word_score(item, image_width, image_height) for item in reveal_detections)
+    reveal_bonus = min(len(reveal_detections), config.max_reveal_words) * 0.65
+
+    return round(answer_score + reveal_score + reveal_bonus, 4)
 
 
 def clamp(value: float, low: float, high: float) -> float:
@@ -429,10 +498,6 @@ def aliases_for_label(label: str) -> list[str]:
     if singular:
         aliases.append(singular)
 
-    parts = normalized_label.split()
-    if len(parts) > 1 and len(parts[-1]) > 2:
-        aliases.append(parts[-1])
-
     deduped: list[str] = []
     seen: set[str] = {normalized_label}
     for alias in aliases:
@@ -491,7 +556,11 @@ def build_puzzle(
     labels = {item.label for item in detections}
     alias_counts = build_alias_counts(labels)
 
-    sorted_items = sorted(detections, key=lambda item: item.confidence, reverse=True)
+    sorted_items = sorted(
+        detections,
+        key=lambda item: reveal_word_score(item, image_width, image_height),
+        reverse=True,
+    )
     for item in sorted_items:
         if item.label == answer:
             continue
@@ -532,6 +601,7 @@ def build_puzzle(
             "height": image_height,
         },
         "words": words,
+        "qualityScore": score_puzzle(answer, words, detections, image_width, image_height, config),
         "detections": [serialize_detection(item, labels, alias_counts) for item in sorted_items],
     }
 
@@ -539,10 +609,17 @@ def build_puzzle(
 def generate_puzzle(date_key: str, config: Config, access_key: str) -> dict:
     seen_urls: set[str] = set()
     attempt_notes: list[str] = []
+    best_puzzle: Optional[dict] = None
+    best_score = 0.0
 
     for attempt_index in range(config.max_image_attempts):
-        topic = topic_for_attempt(date_key, config.topics, attempt_index)
-        image_url, image_alt = fetch_unsplash_image(access_key, topic)
+        query_text = query_for_attempt(date_key, config.scene_queries, attempt_index)
+        try:
+            image_url, image_alt = fetch_unsplash_image(access_key, query_text)
+        except RuntimeError as exc:
+            attempt_notes.append(f"{query_text}: {exc}")
+            continue
+
         if image_url in seen_urls:
             continue
         seen_urls.add(image_url)
@@ -558,7 +635,7 @@ def generate_puzzle(date_key: str, config: Config, access_key: str) -> dict:
         answer_count = sum(
             1 for item in detections if is_answer_candidate(item, image_width, image_height, config)
         )
-        attempt_notes.append(f"{topic}: {candidate_count} reveal detections, {answer_count} answer detections")
+        attempt_notes.append(f"{query_text}: {candidate_count} reveal detections, {answer_count} answer detections")
 
         puzzle = build_puzzle(
             date_key=date_key,
@@ -569,13 +646,17 @@ def generate_puzzle(date_key: str, config: Config, access_key: str) -> dict:
             image_height=image_height,
             config=config,
         )
-        if puzzle:
-            return puzzle
+        if puzzle and puzzle["qualityScore"] > best_score:
+            best_puzzle = puzzle
+            best_score = puzzle["qualityScore"]
+
+    if best_puzzle and best_score >= config.min_puzzle_score:
+        return best_puzzle
 
     raise RuntimeError(
         "Failed to generate a high-quality puzzle after multiple attempts. "
-        "Try a different topic pool or lower strictness thresholds. "
-        f"Attempts: {'; '.join(attempt_notes[-8:])}"
+        "Try a different query pool or lower strictness thresholds. "
+        f"Best score: {best_score}. Attempts: {'; '.join(attempt_notes[-8:])}"
     )
 
 

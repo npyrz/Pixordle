@@ -7,10 +7,10 @@ The experience is similar to Wordle in cadence and vocabulary matching, but the 
 ## Product Behavior
 
 - A new daily puzzle is generated at `00:00` in `PIXORDLE_TIMEZONE`.
-- The source image is selected from Unsplash.
+- The source image is selected from object-rich Unsplash scene queries.
 - YOLO object detection identifies objects in the selected image.
 - Each detected object stores its label, confidence score, source-image bounding box, aliases, and board reveal region.
-- The strongest non-bland detection becomes the main answer when possible.
+- The best-scoring non-bland detection becomes the main answer when it is confident, visible, and compositionally central.
 - Other high-confidence detections become reveal words, including common objects that may be too bland for the final answer.
 - Close helper words are accepted, such as plurals and common synonyms.
 - Guessing a reveal word uncovers that object's image region.
@@ -47,7 +47,7 @@ The generator creates one stable puzzle file per date. Once a file exists, it is
 flowchart TD
   Start["00:00 in PIXORDLE_TIMEZONE"]
   DateFile{"Puzzle file already exists?"}
-  Topic["Choose date-based Unsplash topic"]
+  Topic["Choose date-based Unsplash query"]
   Image["Fetch random image"]
   Detect["Run YOLO on image"]
   Quality{"Enough high-quality detections?"}
@@ -72,16 +72,17 @@ flowchart TD
 Generation steps:
 
 1. Resolve today's date in `PIXORDLE_TIMEZONE`.
-2. Pick the first topic deterministically from `UNSPLASH_TOPICS`, then rotate through the topic pool on retries.
-3. Fetch a random squarish Unsplash image for the current topic.
+2. Pick the first object-rich scene query deterministically from `UNSPLASH_QUERIES`, then rotate through the query pool on retries.
+3. Fetch a random squarish Unsplash image for the current query.
 4. Download the selected image.
 5. Run YOLO using `YOLO_MODEL`.
 6. Deduplicate detections by label, keeping the highest-confidence box.
-7. Reject low-confidence labels.
-8. Choose the main answer, preferring non-bland labels that are both confident and visually significant.
-9. Convert detection bounding boxes into Pixordle board reveal regions.
-10. Attach aliases and helper words, dropping aliases that are ambiguous within the puzzle.
-11. Save the final puzzle JSON.
+7. Reject low-confidence, tiny, and oversized labels.
+8. Score the composition for a centered main object plus several visible side objects.
+9. Keep the highest-scoring candidate across the full attempt set.
+10. Convert detection bounding boxes into Pixordle board reveal regions.
+11. Attach aliases and helper words, dropping aliases that are ambiguous within the puzzle.
+12. Save the final puzzle JSON.
 
 ## Guess Flow
 
@@ -189,16 +190,19 @@ Create `.env` from `.env.example`.
 | `YOLO_CONFIDENCE` | Minimum detection confidence passed to YOLO prediction. |
 | `YOLO_MIN_WORD_CONFIDENCE` | Minimum confidence for reveal word candidates. |
 | `YOLO_MIN_ANSWER_CONFIDENCE` | Minimum confidence required for the main answer. Default: `0.45`. |
-| `YOLO_MIN_ANSWER_AREA` | Minimum fraction of image area required for the main answer bounding box. Default: `0.015`. |
+| `YOLO_MIN_ANSWER_AREA` | Minimum fraction of image area required for the main answer bounding box. Default: `0.025`. |
+| `YOLO_MAX_ANSWER_AREA` | Maximum fraction of image area allowed for the main answer bounding box. Default: `0.45`. |
 | `YOLO_MIN_REVEAL_AREA` | Minimum fraction of image area required for reveal word bounding boxes. Default: `0.003`. |
+| `YOLO_MAX_REVEAL_AREA` | Maximum fraction of image area allowed for reveal word bounding boxes. Default: `0.22`. |
 | `PUZZLE_MIN_REVEAL_WORDS` | Required number of reveal words for a valid puzzle. Default: `3`. |
 | `PUZZLE_MAX_REVEAL_WORDS` | Maximum reveal words stored in a puzzle. |
-| `PUZZLE_MAX_IMAGE_ATTEMPTS` | Number of Unsplash images to try before failing generation. Default: `25`. |
+| `PUZZLE_MAX_IMAGE_ATTEMPTS` | Number of Unsplash images to score before failing generation. Default: `40`. |
+| `PUZZLE_MIN_SCORE` | Minimum composition score required for a generated puzzle. Default: `8.0`. |
 | `PUZZLE_BLAND_LABELS` | Labels that are avoided as the main answer when a stronger answer exists. They can still be reveal words. |
 | `PUZZLE_BOARD_SIZE` | Reveal coordinate system size. |
 | `PUZZLE_GRID_SIZE` | Number of mask tiles per axis. |
 | `PUZZLE_MAX_GUESSES` | Guess limit per puzzle. |
-| `UNSPLASH_TOPICS` | Comma-separated topic pool for daily image selection. |
+| `UNSPLASH_QUERIES` | Comma-separated object-rich scene query pool for daily image selection. |
 
 ## Production Scheduling
 

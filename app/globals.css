@@ -179,11 +179,12 @@ h2 {
   display: grid;
   grid-template-columns: repeat(var(--grid-size), 1fr);
   grid-template-rows: repeat(var(--grid-size), 1fr);
+  background: #0d1724;
 }
 
 .tile {
-  border: 1px solid rgba(255, 255, 255, 0.02);
-  background: rgba(16, 25, 39, 0.94);
+  border: 1px solid rgba(36, 50, 68, 0.74);
+  background: #101927;
   transition:
     opacity 180ms ease,
     transform 180ms ease;

@@ -78,9 +78,9 @@ Generation steps:
 5. Run YOLO using `YOLO_MODEL`.
 6. Deduplicate detections by label, keeping the highest-confidence box.
 7. Reject low-confidence labels.
-8. Choose the main answer, preferring non-bland labels but falling back to the strongest usable detection.
+8. Choose the main answer, preferring non-bland labels that are both confident and visually significant.
 9. Convert detection bounding boxes into Pixordle board reveal regions.
-10. Attach aliases and helper words.
+10. Attach aliases and helper words, dropping aliases that are ambiguous within the puzzle.
 11. Save the final puzzle JSON.
 
 ## Guess Flow
@@ -187,7 +187,10 @@ Create `.env` from `.env.example`.
 | `AUTO_GENERATE_DAILY` | Enables API-level generation if today's puzzle is missing. |
 | `YOLO_MODEL` | YOLO model file, for example `yolov8m.pt`. |
 | `YOLO_CONFIDENCE` | Minimum detection confidence passed to YOLO prediction. |
-| `YOLO_MIN_WORD_CONFIDENCE` | Minimum confidence for answer and reveal word candidates. |
+| `YOLO_MIN_WORD_CONFIDENCE` | Minimum confidence for reveal word candidates. |
+| `YOLO_MIN_ANSWER_CONFIDENCE` | Minimum confidence required for the main answer. Default: `0.45`. |
+| `YOLO_MIN_ANSWER_AREA` | Minimum fraction of image area required for the main answer bounding box. Default: `0.015`. |
+| `YOLO_MIN_REVEAL_AREA` | Minimum fraction of image area required for reveal word bounding boxes. Default: `0.003`. |
 | `PUZZLE_MIN_REVEAL_WORDS` | Required number of reveal words for a valid puzzle. Default: `3`. |
 | `PUZZLE_MAX_REVEAL_WORDS` | Maximum reveal words stored in a puzzle. |
 | `PUZZLE_MAX_IMAGE_ATTEMPTS` | Number of Unsplash images to try before failing generation. Default: `25`. |

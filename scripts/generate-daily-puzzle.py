@@ -126,6 +126,9 @@ class Config:
     yolo_model: str
     yolo_confidence: float
     yolo_min_word_confidence: float
+    yolo_min_answer_confidence: float
+    yolo_min_answer_area: float
+    yolo_min_reveal_area: float
     min_reveal_words: int
     max_reveal_words: int
     max_image_attempts: int
@@ -182,6 +185,9 @@ def parse_config() -> Config:
         yolo_model=os.environ.get("YOLO_MODEL", "yolov8m.pt"),
         yolo_confidence=float(os.environ.get("YOLO_CONFIDENCE", "0.2")),
         yolo_min_word_confidence=float(os.environ.get("YOLO_MIN_WORD_CONFIDENCE", "0.25")),
+        yolo_min_answer_confidence=float(os.environ.get("YOLO_MIN_ANSWER_CONFIDENCE", "0.45")),
+        yolo_min_answer_area=float(os.environ.get("YOLO_MIN_ANSWER_AREA", "0.015")),
+        yolo_min_reveal_area=float(os.environ.get("YOLO_MIN_REVEAL_AREA", "0.003")),
         min_reveal_words=int(os.environ.get("PUZZLE_MIN_REVEAL_WORDS", "3")),
         max_reveal_words=int(os.environ.get("PUZZLE_MAX_REVEAL_WORDS", "12")),
         max_image_attempts=int(os.environ.get("PUZZLE_MAX_IMAGE_ATTEMPTS", "25")),
@@ -315,19 +321,48 @@ def run_yolo(image_path: Path, config: Config) -> tuple[list[Detection], int, in
     return list(deduped.values()), width, height
 
 
-def choose_answer(detections: list[Detection], config: Config) -> Optional[str]:
+def bbox_area_ratio(item: Detection, image_width: int, image_height: int) -> float:
+    x1, y1, x2, y2 = item.bbox
+    box_width = max(x2 - x1, 0.0)
+    box_height = max(y2 - y1, 0.0)
+    image_area = max(image_width * image_height, 1)
+    return (box_width * box_height) / image_area
+
+
+def is_answer_candidate(item: Detection, image_width: int, image_height: int, config: Config) -> bool:
+    if item.confidence < config.yolo_min_answer_confidence:
+        return False
+    if bbox_area_ratio(item, image_width, image_height) < config.yolo_min_answer_area:
+        return False
+    return True
+
+
+def is_reveal_candidate(item: Detection, image_width: int, image_height: int, config: Config) -> bool:
+    if item.confidence < config.yolo_min_word_confidence:
+        return False
+    if bbox_area_ratio(item, image_width, image_height) < config.yolo_min_reveal_area:
+        return False
+    return True
+
+
+def choose_answer(
+    detections: list[Detection],
+    image_width: int,
+    image_height: int,
+    config: Config,
+) -> Optional[str]:
     sorted_items = sorted(detections, key=lambda item: item.confidence, reverse=True)
     for item in sorted_items:
         if item.label in config.bland_labels:
             continue
-        if item.confidence < config.yolo_min_word_confidence:
+        if not is_answer_candidate(item, image_width, image_height, config):
             continue
         return item.label
 
     # Prefer a non-bland answer, but do not fail a usable image just because
     # all detections are common objects. The reveal words still come from boxes.
     for item in sorted_items:
-        if item.confidence >= config.yolo_min_word_confidence:
+        if is_answer_candidate(item, image_width, image_height, config):
             return item.label
 
     return None
@@ -410,10 +445,29 @@ def aliases_for_label(label: str) -> list[str]:
     return deduped
 
 
-def serialize_detection(item: Detection) -> dict:
+def aliases_for_puzzle_label(label: str, labels: set[str], alias_counts: dict[str, int]) -> list[str]:
+    aliases: list[str] = []
+    for alias in aliases_for_label(label):
+        if alias in labels:
+            continue
+        if alias_counts.get(alias, 0) > 1:
+            continue
+        aliases.append(alias)
+    return aliases
+
+
+def build_alias_counts(labels: set[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for label in labels:
+        for alias in aliases_for_label(label):
+            counts[alias] = counts.get(alias, 0) + 1
+    return counts
+
+
+def serialize_detection(item: Detection, labels: set[str], alias_counts: dict[str, int]) -> dict:
     return {
         "label": item.label,
-        "aliases": aliases_for_label(item.label),
+        "aliases": aliases_for_puzzle_label(item.label, labels, alias_counts),
         "confidence": round(item.confidence, 4),
         "bbox": [round(value, 2) for value in item.bbox],
     }
@@ -428,18 +482,20 @@ def build_puzzle(
     image_height: int,
     config: Config,
 ) -> Optional[dict]:
-    answer = choose_answer(detections, config)
+    answer = choose_answer(detections, image_width, image_height, config)
     if not answer:
         return None
 
     words: list[dict] = []
     seen: set[str] = set()
+    labels = {item.label for item in detections}
+    alias_counts = build_alias_counts(labels)
 
     sorted_items = sorted(detections, key=lambda item: item.confidence, reverse=True)
     for item in sorted_items:
         if item.label == answer:
             continue
-        if item.confidence < config.yolo_min_word_confidence:
+        if not is_reveal_candidate(item, image_width, image_height, config):
             continue
         if item.label in seen:
             continue
@@ -447,7 +503,7 @@ def build_puzzle(
         words.append(
             {
                 "guess": item.label,
-                "aliases": aliases_for_label(item.label),
+                "aliases": aliases_for_puzzle_label(item.label, labels, alias_counts),
                 "reveal": convert_bbox_to_reveal(item.bbox, image_width, image_height, config.board_size),
                 "confidence": round(item.confidence, 4),
             }
@@ -465,7 +521,7 @@ def build_puzzle(
         "dateKey": date_key,
         "title": f"Daily {answer.title()} Puzzle",
         "answer": answer,
-        "aliases": aliases_for_label(answer),
+        "aliases": aliases_for_puzzle_label(answer, labels, alias_counts),
         "maxGuesses": config.max_guesses,
         "boardSize": config.board_size,
         "gridSize": config.grid_size,
@@ -476,7 +532,7 @@ def build_puzzle(
             "height": image_height,
         },
         "words": words,
-        "detections": [serialize_detection(item) for item in sorted_items],
+        "detections": [serialize_detection(item, labels, alias_counts) for item in sorted_items],
     }
 
 
@@ -497,9 +553,12 @@ def generate_puzzle(date_key: str, config: Config, access_key: str) -> dict:
             detections, image_width, image_height = run_yolo(image_path, config)
 
         candidate_count = sum(
-            1 for item in detections if item.confidence >= config.yolo_min_word_confidence
+            1 for item in detections if is_reveal_candidate(item, image_width, image_height, config)
         )
-        attempt_notes.append(f"{topic}: {candidate_count} usable detections")
+        answer_count = sum(
+            1 for item in detections if is_answer_candidate(item, image_width, image_height, config)
+        )
+        attempt_notes.append(f"{topic}: {candidate_count} reveal detections, {answer_count} answer detections")
 
         puzzle = build_puzzle(
             date_key=date_key,

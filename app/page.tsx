@@ -1,9 +1,13 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 
 type PublicPuzzle = {
   id: string;
+  dateKey: string;
+  resetAt: string;
+  timeZone: string;
   title: string;
   maxGuesses: number;
   boardSize: number;
@@ -29,13 +33,19 @@ type GuessEntry = {
   kind: "answer" | "related" | "miss";
 };
 
-const defaultMessage = "Find related words to reveal the image, then name the main answer.";
+const defaultMessage = "Guess objects or close helper words to reveal their locations, then name the image.";
 
-function getMsUntilNextMidnight() {
-  const now = new Date();
-  const nextMidnight = new Date(now);
-  nextMidnight.setHours(24, 0, 0, 0);
-  return nextMidnight.getTime() - now.getTime();
+function getMsUntilReset(resetAt?: string) {
+  if (!resetAt) {
+    return null;
+  }
+
+  const resetTime = new Date(resetAt).getTime();
+  if (!Number.isFinite(resetTime)) {
+    return null;
+  }
+
+  return Math.max(resetTime - Date.now(), 1000);
 }
 
 export default function Home() {
@@ -60,6 +70,10 @@ export default function Home() {
 
   const loadPuzzle = useCallback(async (reset = false) => {
     const response = await fetch("/api/puzzle", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error("Puzzle request failed");
+    }
+
     const data = (await response.json()) as PublicPuzzle;
     setPuzzle(data);
 
@@ -84,15 +98,20 @@ export default function Home() {
   }, [loadPuzzle]);
 
   useEffect(() => {
+    const delay = getMsUntilReset(puzzle?.resetAt);
+    if (!delay) {
+      return;
+    }
+
     const timeout = window.setTimeout(() => {
       loadPuzzle(true).catch(() => {
         setMessage("A new daily image was expected, but refresh failed.");
         setTone("warning");
       });
-    }, getMsUntilNextMidnight());
+    }, delay);
 
     return () => window.clearTimeout(timeout);
-  }, [loadPuzzle]);
+  }, [loadPuzzle, puzzle?.resetAt]);
 
   async function submitGuess(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -163,7 +182,9 @@ export default function Home() {
       <section className="game">
         <header className="topbar">
           <div className="brandBlock">
-            <p className="eyebrow">Image word puzzle</p>
+            <p className="eyebrow">
+              Daily image puzzle{puzzle?.dateKey ? ` / ${puzzle.dateKey}` : ""}
+            </p>
             <h1 className="logoWord">Pixordle</h1>
           </div>
           <div className="stats" aria-live="polite">
@@ -179,12 +200,21 @@ export default function Home() {
         </header>
 
         <section className="workspace">
-          <div className="imageStage" aria-label={puzzle?.title ?? "Loading puzzle"}>
+          <div
+            className="imageStage"
+            aria-label={puzzle?.title ?? "Loading puzzle"}
+            style={{ "--grid-size": puzzle?.gridSize ?? 10 } as CSSProperties}
+          >
             {puzzle?.imageUrl ? (
               <img alt={puzzle.imageAlt || puzzle.title} className="puzzleImage" src={puzzle.imageUrl} />
             ) : (
               <div className="puzzleImage" />
             )}
+            <div className="maskLayer" aria-hidden="true">
+              {Array.from({ length: (puzzle?.gridSize ?? 10) ** 2 }, (_, index) => (
+                <span className={revealedTiles.has(index) ? "tile revealed" : "tile"} key={index} />
+              ))}
+            </div>
             {loading && <div className="loading">Loading puzzle</div>}
           </div>
 
@@ -232,9 +262,10 @@ export default function Home() {
                 </button>
               </div>
               <ol>
-                {history.map((entry) => (
+                {history.map((entry, index) => (
                   <li className={entry.kind} key={`${entry.normalized}-${entry.text}`}>
-                    {entry.text}
+                    <span className="guessIndex">{index + 1}.</span>
+                    <span className="guessPill">{entry.text}</span>
                   </li>
                 ))}
               </ol>

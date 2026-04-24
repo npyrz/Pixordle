@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "generate:daily": "python3 scripts/generate-daily-puzzle.py",
+    "generate:daemon": "python3 scripts/run-daily-generator.py"
   },
   "dependencies": {
     "next": "latest",

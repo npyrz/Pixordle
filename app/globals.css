@@ -151,11 +151,12 @@ h2 {
 }
 
 .imageStage {
+  --grid-size: 10;
   position: relative;
   overflow: hidden;
   width: 100%;
-  aspect-ratio: 4 / 3;
-  max-height: min(68vh, 620px);
+  aspect-ratio: 1;
+  max-height: min(72vh, 680px);
   border-radius: 8px;
   background: #cfd9e3;
   box-shadow: var(--shadow);
@@ -170,20 +171,19 @@ h2 {
 }
 
 .puzzleImage {
-  object-fit: contain;
+  object-fit: fill;
 }
 
 .maskLayer {
+  pointer-events: none;
   display: grid;
-  grid-template-columns: repeat(10, 1fr);
-  grid-template-rows: repeat(10, 1fr);
+  grid-template-columns: repeat(var(--grid-size), 1fr);
+  grid-template-rows: repeat(var(--grid-size), 1fr);
 }
 
 .tile {
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent),
-    #1d2838;
+  border: 1px solid rgba(36, 50, 68, 0.74);
+  background: #101927;
   transition:
     opacity 180ms ease,
     transform 180ms ease;
@@ -295,8 +295,7 @@ button:disabled {
   gap: 12px;
 }
 
-.wordGrid,
-.history ol {
+.wordGrid {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -305,7 +304,7 @@ button:disabled {
 }
 
 .word,
-.history li {
+.guessPill {
   max-width: 100%;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -318,13 +317,13 @@ button:disabled {
 }
 
 .word.found,
-.history li.related {
+.history li.related .guessPill {
   border-color: rgba(20, 119, 87, 0.28);
   background: rgba(20, 119, 87, 0.11);
   color: var(--good);
 }
 
-.history li.answer {
+.history li.answer .guessPill {
   border-color: rgba(223, 81, 63, 0.34);
   background: rgba(223, 81, 63, 0.12);
   color: var(--accentStrong);
@@ -335,6 +334,29 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.history ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.history li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.guessIndex {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 860;
+  line-height: 1;
 }
 
 @media (max-width: 880px) {
